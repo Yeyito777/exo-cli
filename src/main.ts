@@ -6,8 +6,8 @@
  * The daemon holds all state; conversation IDs are the handles.
  *
  * Usage:
- *   exo "question"                  Send a message (new conversation)
- *   exo "follow up" -c <id>         Continue a conversation
+ *   exo send "message"              Send a message (new conversation)
+ *   exo send "follow up" -c <id>    Continue a conversation
  *   exo ls                          List conversations
  *   exo info <id>                   Show conversation metadata
  *   exo history <id>                Show conversation history
@@ -35,7 +35,7 @@ import type { ModelId } from "./shared/protocol";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
-const SUBCOMMANDS = new Set(["ls", "info", "history", "rm", "abort", "rename", "llm", "status", "help"]);
+const SUBCOMMANDS = new Set(["send", "ls", "info", "history", "rm", "abort", "rename", "llm", "status", "help"]);
 
 // Aliases → canonical subcommand name
 const ALIASES: Record<string, string> = {
@@ -51,20 +51,11 @@ const ALIASES: Record<string, string> = {
   health: "status",
   log: "history",
   show: "info",
-  send: "send",        // explicit send (not a real subcommand, handled in default)
   chat: "send",
   ask: "send",
+  a: "send",
   one: "llm",          // "exo one 'quick question'" as shorthand for llm
 };
-
-// Words that look like they could be command attempts (for the safety heuristic)
-function looksLikeCommand(word: string): boolean {
-  // Single lowercase word, no spaces, short enough to be a command, not a path/URL
-  return /^[a-z][-a-z0-9]{1,15}$/.test(word)
-    && !word.includes("/")
-    && !word.includes(".")
-    && !word.startsWith("http");
-}
 
 interface ParsedArgs {
   subcommand: string | null;
@@ -132,9 +123,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       result.subcommand = result.positionals.shift()!;
     } else if (first in ALIASES) {
       result.positionals.shift();
-      const resolved = ALIASES[first];
-      // "send", "chat", "ask" resolve to "send" which is the default path (null subcommand)
-      result.subcommand = resolved === "send" ? null : resolved;
+      result.subcommand = ALIASES[first];
     }
   }
 
@@ -171,19 +160,23 @@ async function main(): Promise<number> {
   if (args.wantsHelp) {
     if (args.subcommand && hasCommandHelp(args.subcommand)) {
       printCommandHelp(args.subcommand);
-    } else if (!args.subcommand && args.positionals.length === 0) {
-      printHelp();
     } else {
-      // exo --help with positionals → treat as "send --help"
-      printCommandHelp("send");
+      printHelp();
     }
     return 0;
   }
 
   // No args at all → show help
-  if (args.positionals.length === 0 && !args.subcommand) {
+  if (!args.subcommand && args.positionals.length === 0) {
     printHelp();
     return 0;
+  }
+
+  // Positionals but no recognized subcommand → unknown command
+  if (!args.subcommand && args.positionals.length > 0) {
+    process.stderr.write(`Unknown command: ${args.positionals[0]}\n\n`);
+    printHelp();
+    return 1;
   }
 
   const opts: OutputOptions = {
@@ -250,31 +243,22 @@ async function main(): Promise<number> {
         return await llm(conn, text, args.system, args.model, opts);
       }
 
-      default: {
-        // No subcommand → send message
+      case "send": {
         let text: string;
         if (args.positionals.length === 1 && args.positionals[0] === "-") {
           text = await readStdin();
         } else {
           text = args.positionals.join(" ");
         }
-        if (!text) { printHelp(); return 0; }
-
-        // Safety heuristic: if ALL positionals are short lowercase words,
-        // they probably meant a command, not a message to send to the AI.
-        if (args.positionals.length <= 3 && args.positionals.every(w => looksLikeCommand(w)) && !args.conv) {
-          const allCommands = [...SUBCOMMANDS].filter(c => c !== "help").concat(Object.keys(ALIASES));
-          process.stderr.write(
-            `Unknown command: ${text}\n` +
-            `Available commands: ${[...SUBCOMMANDS].filter(c => c !== "help").join(", ")}\n` +
-            `Aliases: ${Object.entries(ALIASES).map(([a, c]) => `${a}→${c}`).join(", ")}\n\n` +
-            `If you meant to send this as a message, quote it:\n` +
-            `  exo "${text}"\n`
-          );
-          return 1;
-        }
-
+        if (!text) { process.stderr.write("Usage: exo send \"message\"\nRun 'exo send --help' for details.\n"); return 1; }
         return await send(conn, text, args.conv, args.model, opts);
+      }
+
+      default: {
+        // Should be unreachable — unknown commands are caught before connecting
+        process.stderr.write(`Unknown command: ${args.subcommand}\n\n`);
+        printHelp();
+        return 1;
       }
     }
   } catch (err: any) {

@@ -11,12 +11,13 @@ usage() {
 usage: exo <command> [args]
 
 Send messages:
-  exo "message"                     New conversation
-  exo "message" -c <id>             Continue a conversation
-  exo "message" --opus              Use a specific model
-  cat file | exo -                  Read from stdin
+  exo send "message"                New conversation
+  exo send "message" -c <id>        Continue a conversation
+  exo send "message" --opus         Use a specific model
+  cat file | exo send -             Read from stdin
 
 commands:
+  send         Send a message (aliases: ask, chat, a)
   ls           List conversations
   info         Conversation metadata
   history      Conversation history

@@ -11,19 +11,20 @@ export function printHelp(): void {
   process.stdout.write(`${b("exo")} — Exocortex CLI client
 
 ${b("USAGE")}
-  exo "message"                     Send a message (new conversation)
-  exo "message" -c <id>             Continue a conversation
-  exo "message" --opus              Use a specific model
-  cat file | exo -                  Read message from stdin
+  exo send "message"                Send a message (new conversation)
+  exo send "message" -c <id>        Continue a conversation
+  exo send "message" --opus         Use a specific model
+  cat file | exo send -             Read message from stdin
 
 ${b("COMMANDS")}
+  send (ask, chat, a) "message"     Send a message to the AI
   ls (list)                         List conversations
   info (show) <id>                  Conversation metadata
   history (log) <id>                Conversation history
   rm (delete, del) <id>             Delete a conversation
   abort (kill, cancel) <id>         Abort in-flight stream
   rename (mv, title) <id> <title>   Rename a conversation
-  llm "text" --system "prompt"      One-shot LLM (no conversation)
+  llm (one) "text" --system "..."   One-shot LLM (no conversation)
   status (ping)                     Check if daemon is running
   help                              Show this help
 
@@ -51,16 +52,17 @@ Run ${b("exo <command> --help")} for command-specific usage.
 }
 
 const COMMAND_HELP: Record<string, string> = {
-  send: `${b("exo")} "message" [flags]
+  send: `${b("exo send")} "message" [flags]
 
 Send a message to the AI. Creates a new conversation unless -c is given.
+Aliases: ask, chat, a
 
 ${b("USAGE")}
-  exo "what is 2+2"                 New conversation, default model
-  exo "explain this" --opus         New conversation, specific model
-  exo "follow up" -c <id>           Continue existing conversation
-  cat prompt.txt | exo -            Read message from stdin
-  echo "question" | exo - -c <id>   Stdin + continue conversation
+  exo send "what is 2+2"                 New conversation, default model
+  exo send "explain this" --opus         New conversation, specific model
+  exo send "follow up" -c <id>           Continue existing conversation
+  cat prompt.txt | exo send -            Read message from stdin
+  echo "question" | exo send - -c <id>   Stdin + continue conversation
 
 ${b("FLAGS")}
   -c, --conv <id>                   Continue this conversation
@@ -200,9 +202,9 @@ const HELP_ALIASES: Record<string, string> = {
   health: "status",
   log: "history",
   show: "info",
-  send: "send",
   chat: "send",
   ask: "send",
+  a: "send",
   one: "llm",
 };
 
