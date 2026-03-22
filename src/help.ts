@@ -39,6 +39,13 @@ ${b("FLAGS")}
   --timeout <sec>                   Max wait time (default 300)
   --system <prompt>                 System prompt (for llm)
 
+${b("SUBAGENT TIMEOUTS")}
+  Subagent conversations (sending tasks to the AI) can take a long time.
+  Always pass --timeout appropriate to the task complexity:
+    Simple lookups/questions:         --timeout 300   (5 min)
+    Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
+    Complex multi-step work:          --timeout 3600  (1 hour)
+
 Run ${b("exo <command> --help")} for command-specific usage.
 `);
 }
@@ -63,6 +70,13 @@ ${b("FLAGS")}
   --stream                          Stream events as NDJSON as they arrive
   --id                              Print only the conversation ID
   --timeout <sec>                   Max wait time (default 300)
+
+${b("SUBAGENT TIMEOUTS")}
+  Subagent conversations (sending tasks to the AI) can take a long time.
+  Always pass --timeout appropriate to the task complexity:
+    Simple lookups/questions:         --timeout 300   (5 min)
+    Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
+    Complex multi-step work:          --timeout 3600  (1 hour)
 
 ${b("OUTPUT")}
   Default: response text + tool call summaries, then "exo:<convId>" on the last line.
