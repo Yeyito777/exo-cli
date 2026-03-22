@@ -1,0 +1,9 @@
+{
+  "name": "exo",
+  "bin": "./bin/exo",
+  "systemHint": "You can manage conversations and do scripted LLM calls with the `exo` CLI (source at ~/Workspace/Exocortex/external-tools/exo-cli). Run `exo -h` for usage reference.",
+  "display": {
+    "label": "Exo CLI",
+    "color": "#b48ead"
+  }
+}

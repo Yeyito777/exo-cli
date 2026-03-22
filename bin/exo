@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# exo — Exocortex CLI client.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+BUN="$HOME/.local/bun/bin/bun"
+
+usage() {
+    cat <<'EOF'
+usage: exo <command> [args]
+
+Send messages:
+  exo "message"                     New conversation
+  exo "message" -c <id>             Continue a conversation
+  exo "message" --opus              Use a specific model
+  cat file | exo -                  Read from stdin
+
+commands:
+  ls           List conversations
+  info         Conversation metadata
+  history      Conversation history
+  rm           Delete a conversation
+  abort        Abort in-flight stream
+  rename       Rename a conversation
+  llm          One-shot LLM (no conversation)
+  status       Check daemon health
+  help         Show this help
+
+flags:
+  --opus, --sonnet, --haiku         Model selection
+  -c, --conv <id>                   Conversation ID
+  --json                            Structured JSON output
+  --full                            Include thinking + tool results
+  --stream                          Stream events as NDJSON
+  --id                              Print only conversation ID
+  --timeout <sec>                   Max wait time (default 300)
+  --system <prompt>                 System prompt (for llm)
+
+Run 'exo <command> --help' for command-specific usage.
+EOF
+}
+
+if [[ $# -eq 0 ]]; then
+    usage
+    exit 1
+fi
+
+case "$1" in
+    help|--help|-h)
+        # If 'exo help <topic>', delegate to bun for per-command help.
+        if [[ "$1" == "help" && $# -gt 1 ]]; then
+            exec "$BUN" run "$PROJECT_DIR/src/main.ts" "$@"
+        fi
+        usage ;;
+    *)
+        exec "$BUN" run "$PROJECT_DIR/src/main.ts" "$@" ;;
+esac
