@@ -6,6 +6,7 @@
 import type { Connection } from "./conn";
 import type {
   ModelId,
+  QueueTiming,
   Event,
   PongEvent,
   ConversationCreatedEvent,
@@ -297,6 +298,18 @@ export async function abort(conn: Connection, convId: string): Promise<number> {
     (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
   );
   process.stdout.write("Aborted.\n");
+  return 0;
+}
+
+// ── queue ──────────────────────────────────────────────────────────
+
+export async function queue(conn: Connection, convId: string, text: string, timing: QueueTiming): Promise<number> {
+  const reqId = nextReqId();
+  await conn.request<AckEvent>(
+    { type: "queue_message", reqId, convId, text, timing },
+    (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+  );
+  process.stdout.write(`Queued (${timing}) for ${convId}\n`);
   return 0;
 }
 

@@ -23,6 +23,7 @@ ${b("COMMANDS")}
   history (log) <id>                Conversation history
   rm (delete, del) <id>             Delete a conversation
   abort (kill, cancel) <id>         Abort in-flight stream
+  queue <id> "msg" [--end]         Queue message for delivery
   rename (mv, title) <id> <title>   Rename a conversation
   llm (one) "text" --system "..."   One-shot LLM (no conversation)
   status (ping)                     Check if daemon is running
@@ -144,6 +145,23 @@ Abort an in-flight stream for a conversation.
 
 ${b("USAGE")}
   exo abort <convId>
+`,
+
+  queue: `${b("exo queue")} <id> "message" [--end]
+
+Queue a message for delivery to a conversation. The message is held by the
+daemon and injected automatically — either before the next AI turn (default)
+or appended after the current response finishes (--end).
+
+Useful when a conversation is actively streaming and \`exo send\` would fail
+with "Already streaming".
+
+${b("USAGE")}
+  exo queue <convId> "message"           Queue for next turn (default)
+  exo queue <convId> "message" --end     Queue for message-end delivery
+
+${b("FLAGS")}
+  --end                             Deliver at message-end instead of next-turn
 `,
 
   rename: `${b("exo rename")} <id> <title>

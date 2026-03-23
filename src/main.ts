@@ -29,13 +29,13 @@
  */
 
 import { Connection } from "./conn";
-import { send, ls, info, history, rm, abort, rename, llm, status, type OutputOptions } from "./commands";
+import { send, ls, info, history, rm, abort, queue, rename, llm, status, type OutputOptions } from "./commands";
 import { printHelp, printCommandHelp, hasCommandHelp } from "./help";
 import type { ModelId } from "./shared/protocol";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
-const SUBCOMMANDS = new Set(["send", "ls", "info", "history", "rm", "abort", "rename", "llm", "status", "help"]);
+const SUBCOMMANDS = new Set(["send", "ls", "info", "history", "rm", "abort", "queue", "rename", "llm", "status", "help"]);
 
 // Aliases → canonical subcommand name
 const ALIASES: Record<string, string> = {
@@ -69,6 +69,7 @@ interface ParsedArgs {
   idOnly: boolean;
   timeout: number;
   wantsHelp: boolean;
+  endTiming: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -84,6 +85,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     idOnly: false,
     timeout: 300_000,
     wantsHelp: false,
+    endTiming: false,
   };
 
   let i = 0;
@@ -107,6 +109,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     if (arg === "--timeout" && i + 1 < argv.length) {
       result.timeout = parseInt(argv[++i], 10) * 1000; i++; continue;
     }
+    if (arg === "--end") { result.endTiming = true; i++; continue; }
     if (arg === "-h" || arg === "--help") {
       result.wantsHelp = true; i++; continue;
     }
@@ -241,6 +244,14 @@ async function main(): Promise<number> {
           : args.positionals.join(" ");
         if (!text) { process.stderr.write("Usage: exo llm \"text\" --system \"prompt\"\nRun 'exo llm --help' for details.\n"); return 1; }
         return await llm(conn, text, args.system, args.model, opts);
+      }
+
+      case "queue": {
+        const convId = args.positionals[0];
+        const text = args.positionals.slice(1).join(" ");
+        if (!convId || !text) { process.stderr.write("Usage: exo queue <convId> \"message\" [--end]\nRun 'exo queue --help' for details.\n"); return 1; }
+        const timing = args.endTiming ? "message-end" as const : "next-turn" as const;
+        return await queue(conn, convId, text, timing);
       }
 
       case "send": {
