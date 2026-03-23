@@ -153,7 +153,22 @@ export async function send(
       ? makeLiveStreamCallback(convId, opts.full)
       : undefined;
 
-  const response = await collectResponse(conn, convId, text, opts.timeout, onStream);
+  let response: Awaited<ReturnType<typeof collectResponse>>;
+  try {
+    response = await collectResponse(conn, convId, text, opts.timeout, onStream);
+  } catch (err: any) {
+    // If the conversation is actively streaming, auto-queue for next turn
+    if (convId && err?.message?.includes("Already streaming")) {
+      const reqId = nextReqId();
+      await conn.request<AckEvent>(
+        { type: "queue_message", reqId, convId, text, timing: "next-turn" },
+        (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+      );
+      process.stdout.write("Conversation is busy — message queued for next turn.\n");
+      return 0;
+    }
+    throw err;
+  }
 
   // Unsubscribe — symmetric with the subscribe above. Not strictly required
   // since disconnect() closes the socket, but keeps the protocol clean.
