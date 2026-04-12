@@ -9,9 +9,12 @@
  * live in each package's own messages.ts and re-export from here.
  */
 
-// ── Models ──────────────────────────────────────────────────────────
+// ── Providers / Models ──────────────────────────────────────────────
 
-export type ModelId = "sonnet" | "haiku" | "opus";
+export type ProviderId = "anthropic" | "openai";
+
+/** Provider-scoped model identifier. */
+export type ModelId = string;
 
 // ── Effort ─────────────────────────────────────────────────────────
 
@@ -21,10 +24,17 @@ export const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "
 export const DEFAULT_EFFORT: EffortLevel = "high";
 
 /** Maximum context window size in tokens, per model. */
-export const MAX_CONTEXT: Record<ModelId, number> = {
+export const MAX_CONTEXT: Record<string, number> = {
   sonnet: 1_000_000,
   haiku: 1_000_000,
   opus: 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
+  "claude-haiku-4-5-20251001": 1_000_000,
+  "claude-opus-4-6": 1_000_000,
+  "gpt-5": 400_000,
+  "gpt-5.4": 272_000,
+  "gpt-5.4-mini": 272_000,
+  "gpt-5.3-codex-spark": 128_000,
 };
 
 // ── Image attachments ──────────────────────────────────────────────

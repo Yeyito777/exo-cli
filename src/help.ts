@@ -7,14 +7,26 @@
 
 const b = (s: string) => `\x1b[1m${s}\x1b[0m`;
 
+const MODEL_FLAG_SUMMARY = `  --opus, --sonnet, --haiku         Claude model shortcuts
+  --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
+                                    claude-opus-4-6 | openai/gpt-5.4
+  --provider <id>                   Provider: anthropic | openai`;
+
+const MODEL_FLAG_SUMMARY_SEND = `  --opus, --sonnet, --haiku         Claude model shortcuts
+  --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
+                                    claude-opus-4-6 | openai/gpt-5.4-mini
+  --provider <id>                   Provider: anthropic | openai`;
+
 export function printHelp(): void {
   process.stdout.write(`${b("exo")} — Exocortex CLI client
 
 ${b("USAGE")}
-  exo send "message"                Send a message (new conversation)
-  exo send "message" -c <id>        Continue a conversation
-  exo send "message" --opus         Use a specific model
-  cat file | exo send -             Read message from stdin
+  exo send "message"                               New conversation
+  exo send "message" -c <id>                       Continue a conversation
+  exo send "message" --opus                        Claude Opus shortcut
+  exo send "message" --model anthropic/opus-4.6    Explicit model
+  exo send "message" --provider openai --model gpt-5.4-mini
+  cat file | exo send -                             Read message from stdin
 
 ${b("COMMANDS")}
   send (ask, chat, a) "message"     Send a message to the AI
@@ -30,9 +42,7 @@ ${b("COMMANDS")}
   help                              Show this help
 
 ${b("FLAGS")}
-  --opus, --sonnet, --haiku         Model selection (default: opus)
-                                    opus for complex/quality-critical tasks,
-                                    sonnet for routine code, haiku for lookups
+${MODEL_FLAG_SUMMARY}
   -c, --conv <id>                   Conversation ID
   --json                            Structured JSON output
   --full                            Include thinking + tool results
@@ -59,15 +69,16 @@ Send a message to the AI. Creates a new conversation unless -c is given.
 Aliases: ask, chat, a
 
 ${b("USAGE")}
-  exo send "what is 2+2"                 New conversation, default model
-  exo send "explain this" --opus         New conversation, specific model
-  exo send "follow up" -c <id>           Continue existing conversation
-  cat prompt.txt | exo send -            Read message from stdin
-  echo "question" | exo send - -c <id>   Stdin + continue conversation
+  exo send "what is 2+2"                          New conversation
+  exo send "explain this" --opus                  Claude Opus shortcut
+  exo send "explain this" --model anthropic/opus-4.6
+  exo send "follow up" -c <id>                    Continue existing conversation
+  cat prompt.txt | exo send -                      Read message from stdin
+  echo "question" | exo send - -c <id>            Stdin + continue conversation
 
 ${b("FLAGS")}
   -c, --conv <id>                   Continue this conversation
-  --opus, --sonnet, --haiku         Model selection (default: opus)
+${MODEL_FLAG_SUMMARY_SEND}
   --json                            Output as JSON (blocks, tokens, duration)
   --full                            Include thinking blocks and tool results
   --stream                          Stream events as NDJSON as they arrive
@@ -196,11 +207,12 @@ Useful for quick utility calls (classification, summarization, etc).
 ${b("USAGE")}
   exo llm "summarize this text"
   exo llm "translate to spanish" --system "You are a translator"
+  exo llm "refactor this" --model anthropic/sonnet-4.6
   cat file.txt | exo llm - --system "Summarize" --haiku
 
 ${b("FLAGS")}
   --system <prompt>                 System prompt (default: "You are a helpful assistant.")
-  --opus, --sonnet, --haiku         Model selection (default: haiku)
+${MODEL_FLAG_SUMMARY_SEND}
   --json                            Output as JSON object
   --timeout <sec>                   Max wait time (default 300)
 `,

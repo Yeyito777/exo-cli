@@ -5,6 +5,7 @@
 
 import type { Connection } from "./conn";
 import type {
+  ProviderId,
   ModelId,
   QueueTiming,
   Event,
@@ -17,6 +18,7 @@ import type {
   AckEvent,
   LlmCompleteResultEvent,
 } from "./shared/protocol";
+import { inferProviderForModel } from "./model-spec";
 import { collectResponse, type StreamCallback } from "./collect";
 import { formatResponseAsJson, formatEntriesAsText, formatEntriesAsJson } from "./format";
 
@@ -118,21 +120,24 @@ export async function send(
   conn: Connection,
   text: string,
   convId: string | null,
+  provider: ProviderId | null,
   model: ModelId | null,
   opts: OutputOptions,
 ): Promise<number> {
+  const resolvedProvider = provider ?? inferProviderForModel(model);
+
   // Create conversation if needed
   if (!convId) {
     const reqId = nextReqId();
     const title = autoTitle(text);
     const created = await conn.request<ConversationCreatedEvent>(
-      { type: "new_conversation", reqId, model: model ?? undefined, title },
+      { type: "new_conversation", reqId, provider: resolvedProvider ?? undefined, model: model ?? undefined, title },
       (e): e is ConversationCreatedEvent => e.type === "conversation_created" && e.reqId === reqId,
     );
     convId = created.convId;
   } else if (model) {
     // Switch model on existing conversation
-    conn.send({ type: "set_model", convId, model });
+    conn.send({ type: "set_model", convId, provider: resolvedProvider ?? undefined, model });
   }
 
   // Subscribe to get streaming events
@@ -346,12 +351,14 @@ export async function llm(
   conn: Connection,
   userText: string,
   system: string,
+  provider: ProviderId | null,
   model: ModelId | null,
   opts: OutputOptions,
 ): Promise<number> {
   const reqId = nextReqId();
+  const resolvedProvider = provider ?? inferProviderForModel(model);
   const event = await conn.request<LlmCompleteResultEvent>(
-    { type: "llm_complete", reqId, system, userText, model: model ?? undefined },
+    { type: "llm_complete", reqId, provider: resolvedProvider ?? undefined, system, userText, model: model ?? undefined },
     (e): e is LlmCompleteResultEvent => e.type === "llm_complete_result" && e.reqId === reqId,
     opts.timeout,
   );

@@ -11,10 +11,11 @@ usage() {
 usage: exo <command> [args]
 
 Send messages:
-  exo send "message"                New conversation
-  exo send "message" -c <id>        Continue a conversation
-  exo send "message" --opus         Use a specific model
-  cat file | exo send -             Read from stdin
+  exo send "message"                               New conversation
+  exo send "message" -c <id>                       Continue a conversation
+  exo send "message" --opus                        Claude Opus shortcut
+  exo send "message" --model anthropic/opus-4.6    Explicit model
+  cat file | exo send -                             Read from stdin
 
 commands:
   send         Send a message (aliases: ask, chat, a)
@@ -29,7 +30,9 @@ commands:
   help         Show this help
 
 flags:
-  --opus, --sonnet, --haiku         Model selection
+  --opus, --sonnet, --haiku         Claude model shortcuts
+  --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 | openai/gpt-5.4
+  --provider <id>                   Provider: anthropic | openai
   -c, --conv <id>                   Conversation ID
   --json                            Structured JSON output
   --full                            Include thinking + tool results

@@ -8,8 +8,8 @@
  * Commands flow client → daemon. Events flow daemon → client.
  */
 
-import type { ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, ToolDisplayInfo, ExternalToolStyle, ImageAttachment } from "./messages";
-export type { ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, ToolDisplayInfo, ExternalToolStyle, ImageAttachment };
+import type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, ToolDisplayInfo, ExternalToolStyle, ImageAttachment } from "./messages";
+export type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, ToolDisplayInfo, ExternalToolStyle, ImageAttachment };
 
 // ── Commands (client → daemon) ──────────────────────────────────────
 
@@ -21,6 +21,7 @@ export interface PingCommand {
 export interface NewConversationCommand {
   type: "new_conversation";
   reqId?: string;
+  provider?: ProviderId;
   model?: ModelId;
   effort?: EffortLevel;
   /** Initial title. Clients that don't set this get an empty title. */
@@ -71,6 +72,7 @@ export interface SetModelCommand {
   type: "set_model";
   reqId?: string;
   convId: string;
+  provider?: ProviderId;
   model: ModelId;
 }
 
@@ -154,9 +156,10 @@ export interface UnwindConversationCommand {
 export interface LlmCompleteCommand {
   type: "llm_complete";
   reqId?: string;
+  provider?: ProviderId;
   system: string;
   userText: string;
-  /** Model to use. Defaults to "haiku". */
+  /** Model to use. Defaults to the provider's default model. */
   model?: ModelId;
   /** Max output tokens. Defaults to 16000 (must exceed thinking budget for non-adaptive models). */
   maxTokens?: number;

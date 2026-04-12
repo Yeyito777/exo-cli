@@ -18,7 +18,9 @@
  *   exo status                      Check daemon health
  *
  * Flags:
- *   --opus, --sonnet, --haiku       Model selection
+ *   --opus, --sonnet, --haiku       Anthropic model shortcuts
+ *   --model <spec>                  Model spec (e.g. anthropic/opus-4.6)
+ *   --provider <id>                 Explicit provider
  *   -c, --conv <id>                 Conversation ID
  *   --json                          JSON output
  *   --full                          Include thinking + tool results
@@ -31,7 +33,8 @@
 import { Connection } from "./conn";
 import { send, ls, info, history, rm, abort, queue, rename, llm, status, type OutputOptions } from "./commands";
 import { printHelp, printCommandHelp, hasCommandHelp } from "./help";
-import type { ModelId } from "./shared/protocol";
+import { inferProviderForModel, isProviderId, normalizeModelForProvider, parseModelSpecifier } from "./model-spec";
+import type { ModelId, ProviderId } from "./shared/protocol";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -61,6 +64,7 @@ interface ParsedArgs {
   subcommand: string | null;
   positionals: string[];
   conv: string | null;
+  provider: ProviderId | null;
   model: ModelId | null;
   system: string;
   json: boolean;
@@ -70,6 +74,7 @@ interface ParsedArgs {
   timeout: number;
   wantsHelp: boolean;
   endTiming: boolean;
+  parseError: string | null;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -77,6 +82,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     subcommand: null,
     positionals: [],
     conv: null,
+    provider: null,
     model: null,
     system: "You are a helpful assistant.",
     json: false,
@@ -86,6 +92,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     timeout: 300_000,
     wantsHelp: false,
     endTiming: false,
+    parseError: null,
   };
 
   let i = 0;
@@ -93,9 +100,50 @@ function parseArgs(argv: string[]): ParsedArgs {
     const arg = argv[i];
 
     // Flags
-    if (arg === "--opus") { result.model = "opus"; i++; continue; }
-    if (arg === "--sonnet") { result.model = "sonnet"; i++; continue; }
-    if (arg === "--haiku") { result.model = "haiku"; i++; continue; }
+    if (arg === "--opus" || arg === "--sonnet" || arg === "--haiku") {
+      const selection = parseModelSpecifier(arg.slice(2));
+      result.provider = selection.provider;
+      result.model = selection.model;
+      i++;
+      continue;
+    }
+    if (arg === "--provider") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--provider requires a value";
+        return result;
+      }
+      const provider = argv[++i].trim().toLowerCase();
+      if (!isProviderId(provider)) {
+        result.parseError = `Unknown provider: ${provider}`;
+        return result;
+      }
+      result.provider = provider;
+      i++;
+      continue;
+    }
+    if (arg === "--model") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--model requires a value";
+        return result;
+      }
+      try {
+        const spec = argv[++i];
+        if (spec.includes("/")) {
+          const selection = parseModelSpecifier(spec);
+          result.provider = selection.provider;
+          result.model = selection.model;
+        } else {
+          const model = normalizeModelForProvider(result.provider, spec);
+          result.model = model;
+          result.provider = result.provider ?? inferProviderForModel(model) ?? null;
+        }
+      } catch (err) {
+        result.parseError = err instanceof Error ? err.message : String(err);
+        return result;
+      }
+      i++;
+      continue;
+    }
     if (arg === "--json") { result.json = true; i++; continue; }
     if (arg === "--full") { result.full = true; i++; continue; }
     if (arg === "--stream") { result.stream = true; i++; continue; }
@@ -167,6 +215,12 @@ async function main(): Promise<number> {
       printHelp();
     }
     return 0;
+  }
+
+  if (args.parseError) {
+    process.stderr.write(`Error: ${args.parseError}\n\n`);
+    printHelp();
+    return 1;
   }
 
   // No args at all → show help
@@ -243,7 +297,7 @@ async function main(): Promise<number> {
           ? await readStdin()
           : args.positionals.join(" ");
         if (!text) { process.stderr.write("Usage: exo llm \"text\" --system \"prompt\"\nRun 'exo llm --help' for details.\n"); return 1; }
-        return await llm(conn, text, args.system, args.model, opts);
+        return await llm(conn, text, args.system, args.provider, args.model, opts);
       }
 
       case "queue": {
@@ -262,7 +316,7 @@ async function main(): Promise<number> {
           text = args.positionals.join(" ");
         }
         if (!text) { process.stderr.write("Usage: exo send \"message\"\nRun 'exo send --help' for details.\n"); return 1; }
-        return await send(conn, text, args.conv, args.model, opts);
+        return await send(conn, text, args.conv, args.provider, args.model, opts);
       }
 
       default: {
