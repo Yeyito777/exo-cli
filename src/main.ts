@@ -34,6 +34,7 @@ import { Connection } from "./conn";
 import { send, ls, info, history, rm, abort, queue, rename, llm, status, type OutputOptions } from "./commands";
 import { printHelp, printCommandHelp, hasCommandHelp } from "./help";
 import { inferProviderForModel, isProviderId, normalizeModelForProvider, parseModelSpecifier } from "./model-spec";
+import { setRepoRootOverride, setWorktreeOverride, sourceRepoRoot, worktreeName } from "./shared/paths";
 import type { ModelId, ProviderId } from "./shared/protocol";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ interface ParsedArgs {
   provider: ProviderId | null;
   model: ModelId | null;
   system: string;
+  instance: string | null;
   json: boolean;
   full: boolean;
   stream: boolean;
@@ -85,6 +87,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     provider: null,
     model: null,
     system: "You are a helpful assistant.",
+    instance: null,
     json: false,
     full: false,
     stream: false,
@@ -141,6 +144,15 @@ function parseArgs(argv: string[]): ParsedArgs {
         result.parseError = err instanceof Error ? err.message : String(err);
         return result;
       }
+      i++;
+      continue;
+    }
+    if (arg === "--instance") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--instance requires a value";
+        return result;
+      }
+      result.instance = argv[++i].trim() || null;
       i++;
       continue;
     }
@@ -236,6 +248,11 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  if (args.instance) {
+    setWorktreeOverride(args.instance);
+    setRepoRootOverride(`${sourceRepoRoot()}/.worktrees/${args.instance}`);
+  }
+
   const opts: OutputOptions = {
     json: args.json,
     full: args.full,
@@ -251,6 +268,13 @@ async function main(): Promise<number> {
   } catch (err: any) {
     process.stderr.write(`Error: ${err.message}\n`);
     return 2;
+  }
+
+  if (!args.json) {
+    const target = worktreeName();
+    if (args.instance && target) {
+      process.stderr.write(`exo: targeting instance '${target}'\n`);
+    }
   }
 
   try {

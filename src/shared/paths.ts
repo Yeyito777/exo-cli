@@ -1,9 +1,9 @@
 /**
  * @exocortex/shared — Path resolution with git worktree isolation.
  *
- * All paths are resolved relative to the repo root, detected from
- * the source file's own location via import.meta.dir. This means
- * everything works regardless of CWD or where the repo is moved to.
+ * All paths are resolved relative to the active repo root. By default we try
+ * the caller's current git checkout first (so a worktree invocation targets
+ * that worktree's daemon/data), and fall back to the source tree's repo root.
  *
  * Directory layout under <repo>/config/:
  *
@@ -24,17 +24,41 @@ import { join, basename, resolve } from "path";
 
 // ── Repo root ───────────────────────────────────────────────────────
 // This file lives at <repo>/external-tools/exo-cli/src/shared/paths.ts
-// — four levels up is the repo root.
+// — four levels up is the source repo root.
 
-const REPO_ROOT = resolve(import.meta.dir, "../../../..");
-const CONFIG_DIR = join(REPO_ROOT, "config");
+const SOURCE_REPO_ROOT = resolve(import.meta.dir, "../../../..");
 
-// ── Worktree detection ──────────────────────────────────────────────
+// ── Overrides / detection ────────────────────────────────────────────
 
 let _worktreeName: string | null | undefined; // undefined = not yet detected
+let _cwdRepoRoot: string | null | undefined;
+let _worktreeOverride: string | null = null;
+let _repoRootOverride: string | null = null;
+
+function execGit(args: string[]): string {
+  return execSync(`git ${args.join(" ")}`, {
+    cwd: process.cwd(),
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+  }).trim();
+}
 
 /**
- * Detect if we're in a linked git worktree.
+ * Detect the active repo root from the caller's current working directory.
+ * Returns null if the cwd is not inside a git checkout.
+ */
+function detectCwdRepoRoot(): string | null {
+  if (_cwdRepoRoot !== undefined) return _cwdRepoRoot;
+  try {
+    _cwdRepoRoot = resolve(execGit(["rev-parse", "--show-toplevel"]));
+  } catch {
+    _cwdRepoRoot = null;
+  }
+  return _cwdRepoRoot;
+}
+
+/**
+ * Detect if the current working directory is a linked git worktree.
  * Returns the worktree name if so, null otherwise.
  * Result is cached after first call.
  */
@@ -42,15 +66,8 @@ function detectWorktree(): string | null {
   if (_worktreeName !== undefined) return _worktreeName;
 
   try {
-    const gitDir = execSync("git rev-parse --git-dir", {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-
-    const gitCommonDir = execSync("git rev-parse --git-common-dir", {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
+    const gitDir = execGit(["rev-parse", "--git-dir"]);
+    const gitCommonDir = execGit(["rev-parse", "--git-common-dir"]);
 
     // In a linked worktree, --git-dir is something like
     //   /path/to/main/.git/worktrees/<name>
@@ -70,47 +87,59 @@ function detectWorktree(): string | null {
   return _worktreeName;
 }
 
+function effectiveRepoRoot(): string {
+  return _repoRootOverride ?? detectCwdRepoRoot() ?? SOURCE_REPO_ROOT;
+}
+
+function effectiveWorktreeName(): string | null {
+  return _worktreeOverride ?? detectWorktree();
+}
+
+function configDirForRoot(root: string): string {
+  return join(root, "config");
+}
+
 // ── Public API ──────────────────────────────────────────────────────
 
-/** Repository root, resolved from this source file's location. */
+/** Repository root for the targeted daemon instance. */
 export function repoRoot(): string {
-  return REPO_ROOT;
+  return effectiveRepoRoot();
 }
 
 /** Base config directory (<repo>/config). */
 export function configDir(): string {
-  return CONFIG_DIR;
+  return configDirForRoot(repoRoot());
 }
 
 /** External tools directory (<repo>/external-tools). */
 export function externalToolsDir(): string {
-  return join(REPO_ROOT, "external-tools");
+  return join(repoRoot(), "external-tools");
 }
 
 /** Secrets directory — API keys, OAuth tokens. Shared across worktrees. */
 export function secretsDir(): string {
-  return join(CONFIG_DIR, "secrets");
+  return join(configDir(), "secrets");
 }
 
 /** Data directory — conversations, trash. Namespaced by worktree. */
 export function dataDir(): string {
-  const wt = detectWorktree();
+  const wt = effectiveWorktreeName();
   return wt
-    ? join(CONFIG_DIR, "data", "instances", wt)
-    : join(CONFIG_DIR, "data");
+    ? join(configDir(), "data", "instances", wt)
+    : join(configDir(), "data");
 }
 
 /** Storage directory — cron scripts, docs. Persistent user-local files. */
 export function storageDir(): string {
-  return join(CONFIG_DIR, "storage");
+  return join(configDir(), "storage");
 }
 
 /** Runtime dir for socket, PID, logs, usage. Namespaced by worktree. */
 export function runtimeDir(): string {
-  const wt = detectWorktree();
+  const wt = effectiveWorktreeName();
   return wt
-    ? join(CONFIG_DIR, "runtime", wt)
-    : join(CONFIG_DIR, "runtime");
+    ? join(configDir(), "runtime", wt)
+    : join(configDir(), "runtime");
 }
 
 /** Full path to the daemon socket. */
@@ -133,7 +162,32 @@ export function trashDir(): string {
   return join(dataDir(), "trash");
 }
 
-/** The worktree name if in a linked worktree, null otherwise. */
+/** The effective worktree name, including any CLI override. */
 export function worktreeName(): string | null {
-  return detectWorktree();
+  return effectiveWorktreeName();
+}
+
+/** Override the detected worktree instance for this process. */
+export function setWorktreeOverride(name: string | null): void {
+  _worktreeOverride = name && name.trim() ? name.trim() : null;
+}
+
+/** Override the targeted repo root for this process. */
+export function setRepoRootOverride(path: string | null): void {
+  _repoRootOverride = path && path.trim() ? resolve(path.trim()) : null;
+}
+
+/** Return the explicit worktree override, if any. */
+export function worktreeOverride(): string | null {
+  return _worktreeOverride;
+}
+
+/** Return the explicit repo root override, if any. */
+export function repoRootOverride(): string | null {
+  return _repoRootOverride;
+}
+
+/** Source checkout root containing the shared exo-cli code. */
+export function sourceRepoRoot(): string {
+  return SOURCE_REPO_ROOT;
 }

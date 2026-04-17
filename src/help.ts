@@ -7,6 +7,8 @@
 
 const b = (s: string) => `\x1b[1m${s}\x1b[0m`;
 
+const INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target a specific worktree daemon instance`;
+
 const MODEL_FLAG_SUMMARY = `  --opus, --sonnet, --haiku         Claude model shortcuts
   --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
                                     claude-opus-4-6 | openai/gpt-5.4
@@ -26,6 +28,7 @@ ${b("USAGE")}
   exo send "message" --opus                        Claude Opus shortcut
   exo send "message" --model anthropic/opus-4.6    Explicit model
   exo send "message" --provider openai --model gpt-5.4-mini
+  exo status --instance browse-links                Talk to a worktree daemon
   cat file | exo send -                             Read message from stdin
 
 ${b("COMMANDS")}
@@ -42,6 +45,7 @@ ${b("COMMANDS")}
   help                              Show this help
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
 ${MODEL_FLAG_SUMMARY}
   -c, --conv <id>                   Conversation ID
   --json                            Structured JSON output
@@ -77,6 +81,7 @@ ${b("USAGE")}
   echo "question" | exo send - -c <id>            Stdin + continue conversation
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   -c, --conv <id>                   Continue this conversation
 ${MODEL_FLAG_SUMMARY_SEND}
   --json                            Output as JSON (blocks, tokens, duration)
@@ -102,6 +107,7 @@ ${b("OUTPUT")}
 List all conversations.
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   --json                            Output as JSON array
 
 ${b("OUTPUT")}
@@ -118,6 +124,7 @@ ${b("USAGE")}
   exo info <convId> --json
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   --json                            Output as JSON object
 
 ${b("OUTPUT")}
@@ -134,6 +141,7 @@ ${b("USAGE")}
   exo history <convId> --json
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   --json                            Output as JSON array of display entries
   --full                            Include thinking blocks and tool results
 
@@ -148,6 +156,9 @@ Delete a conversation. The daemon soft-deletes to trash.
 
 ${b("USAGE")}
   exo rm <convId>
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
 `,
 
   abort: `${b("exo abort")} <id>
@@ -156,6 +167,9 @@ Abort an in-flight stream for a conversation.
 
 ${b("USAGE")}
   exo abort <convId>
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
 `,
 
   queue: `${b("exo queue")} <id> "message" [--end]
@@ -172,6 +186,7 @@ ${b("USAGE")}
   exo queue <convId> "message" --end     Queue for message-end delivery
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   --end                             Deliver at message-end instead of next-turn
 `,
 
@@ -181,6 +196,9 @@ Rename a conversation.
 
 ${b("USAGE")}
   exo rename <convId> "new title"
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
 `,
 
   status: `${b("exo status")} [flags]
@@ -192,6 +210,7 @@ ${b("USAGE")}
   exo status --json
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   --json                            Output as JSON object
 
 ${b("OUTPUT")}
@@ -211,6 +230,7 @@ ${b("USAGE")}
   cat file.txt | exo llm - --system "Summarize" --haiku
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   --system <prompt>                 System prompt (default: "You are a helpful assistant.")
 ${MODEL_FLAG_SUMMARY_SEND}
   --json                            Output as JSON object

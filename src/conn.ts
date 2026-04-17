@@ -9,7 +9,7 @@
 
 import { connect, type Socket } from "net";
 import { existsSync } from "fs";
-import { socketPath } from "./shared/paths";
+import { socketPath, worktreeName } from "./shared/paths";
 import type { Command, Event } from "./shared/protocol";
 
 export class Connection {
@@ -20,9 +20,11 @@ export class Connection {
   /** Connect to the daemon. Throws if socket doesn't exist or connection fails. */
   async connect(): Promise<void> {
     const path = socketPath();
+    const instance = worktreeName();
     if (!existsSync(path)) {
+      const target = instance ? ` for instance '${instance}'` : "";
       throw new Error(
-        "exocortexd socket not found. Is the daemon running?\n" +
+        `exocortexd socket${target} not found. Is the daemon running?\n` +
         "Start it with: cd daemon && bun run start"
       );
     }
