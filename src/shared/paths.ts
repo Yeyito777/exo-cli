@@ -1,9 +1,9 @@
 /**
- * @exocortex/shared — Path resolution with git worktree isolation.
+ * @exocortex/shared — Path resolution for the default Exocortex daemon.
  *
- * All paths are resolved relative to the active repo root. By default we try
- * the caller's current git checkout first (so a worktree invocation targets
- * that worktree's daemon/data), and fall back to the source tree's repo root.
+ * By default, all paths resolve to the main source checkout. The only way to
+ * target a different daemon instance is an explicit CLI override (for example
+ * `--instance <name>` wired up by the caller).
  *
  * Directory layout under <repo>/config/:
  *
@@ -13,14 +13,12 @@
  *   runtime/            PID, socket, logs, usage.json (ephemeral)
  *   storage/            cron/, fix-auth.md (persistent user-local, not tracked)
  *
- * When running from a linked git worktree, runtime paths (socket, PID, logs)
- * and data paths (conversations) are namespaced by worktree name.
- * This lets multiple daemons coexist — one per worktree — without
- * conflicting. Secrets are always shared (same user, same API key).
+ * When an explicit worktree override is set, runtime paths (socket, PID, logs)
+ * and data paths (conversations) are namespaced by worktree name. Secrets are
+ * still shared across instances.
  */
 
-import { execSync } from "child_process";
-import { join, basename, resolve } from "path";
+import { join, resolve } from "path";
 
 // ── Repo root ───────────────────────────────────────────────────────
 // This file lives at <repo>/external-tools/exo-cli/src/shared/paths.ts
@@ -28,71 +26,17 @@ import { join, basename, resolve } from "path";
 
 const SOURCE_REPO_ROOT = resolve(import.meta.dir, "../../../..");
 
-// ── Overrides / detection ────────────────────────────────────────────
+// ── Explicit overrides ───────────────────────────────────────────────
 
-let _worktreeName: string | null | undefined; // undefined = not yet detected
-let _cwdRepoRoot: string | null | undefined;
 let _worktreeOverride: string | null = null;
 let _repoRootOverride: string | null = null;
 
-function execGit(args: string[]): string {
-  return execSync(`git ${args.join(" ")}`, {
-    cwd: process.cwd(),
-    encoding: "utf-8",
-    stdio: ["pipe", "pipe", "pipe"],
-  }).trim();
-}
-
-/**
- * Detect the active repo root from the caller's current working directory.
- * Returns null if the cwd is not inside a git checkout.
- */
-function detectCwdRepoRoot(): string | null {
-  if (_cwdRepoRoot !== undefined) return _cwdRepoRoot;
-  try {
-    _cwdRepoRoot = resolve(execGit(["rev-parse", "--show-toplevel"]));
-  } catch {
-    _cwdRepoRoot = null;
-  }
-  return _cwdRepoRoot;
-}
-
-/**
- * Detect if the current working directory is a linked git worktree.
- * Returns the worktree name if so, null otherwise.
- * Result is cached after first call.
- */
-function detectWorktree(): string | null {
-  if (_worktreeName !== undefined) return _worktreeName;
-
-  try {
-    const gitDir = execGit(["rev-parse", "--git-dir"]);
-    const gitCommonDir = execGit(["rev-parse", "--git-common-dir"]);
-
-    // In a linked worktree, --git-dir is something like
-    //   /path/to/main/.git/worktrees/<name>
-    // while --git-common-dir is
-    //   /path/to/main/.git
-    // Resolve both to absolute paths to avoid relative/absolute mismatches.
-    if (resolve(gitDir) !== resolve(gitCommonDir)) {
-      _worktreeName = basename(gitDir);
-    } else {
-      _worktreeName = null;
-    }
-  } catch {
-    // Not in a git repo, or git not available
-    _worktreeName = null;
-  }
-
-  return _worktreeName;
-}
-
 function effectiveRepoRoot(): string {
-  return _repoRootOverride ?? detectCwdRepoRoot() ?? SOURCE_REPO_ROOT;
+  return _repoRootOverride ?? SOURCE_REPO_ROOT;
 }
 
 function effectiveWorktreeName(): string | null {
-  return _worktreeOverride ?? detectWorktree();
+  return _worktreeOverride;
 }
 
 function configDirForRoot(root: string): string {
@@ -167,7 +111,7 @@ export function worktreeName(): string | null {
   return effectiveWorktreeName();
 }
 
-/** Override the detected worktree instance for this process. */
+/** Override the targeted worktree instance for this process. */
 export function setWorktreeOverride(name: string | null): void {
   _worktreeOverride = name && name.trim() ? name.trim() : null;
 }
