@@ -11,12 +11,12 @@ const INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target a spec
 
 const MODEL_FLAG_SUMMARY = `  --opus, --sonnet, --haiku         Claude model shortcuts
   --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
-                                    claude-opus-4-6 | openai/gpt-5.4
+                                    claude-opus-4-6 | openai/gpt-5.5
   --provider <id>                   Provider: anthropic | openai`;
 
 const MODEL_FLAG_SUMMARY_SEND = `  --opus, --sonnet, --haiku         Claude model shortcuts
   --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
-                                    claude-opus-4-6 | openai/gpt-5.4-mini
+                                    claude-opus-4-6 | openai/gpt-5.5
   --provider <id>                   Provider: anthropic | openai`;
 
 export function printHelp(): void {

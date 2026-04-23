@@ -32,6 +32,7 @@ export const MAX_CONTEXT: Record<string, number> = {
   "claude-haiku-4-5-20251001": 1_000_000,
   "claude-opus-4-6": 1_000_000,
   "gpt-5": 400_000,
+  "gpt-5.5": 272_000,
   "gpt-5.4": 272_000,
   "gpt-5.4-mini": 272_000,
   "gpt-5.3-codex-spark": 128_000,
