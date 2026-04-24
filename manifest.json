@@ -1,7 +1,7 @@
 {
   "name": "exo",
   "bin": "./bin/exo",
-  "systemHint": "You can manage conversations and do scripted LLM calls with the `exo` CLI (source at ~/Workspace/Exocortex/external-tools/exo-cli). Run `exo -h` for usage reference.\nWhen using `exo` to spawn subagent conversations (i.e. sending a message that asks the AI to perform a task), these typically take a long time to complete. Always pass an appropriate --timeout: 300 (5 min) for simple lookups/questions, 600-1800 (10-30 min) for moderate coding/research tasks, and up to 3600 (1 hour) for complex multi-step work. The default 300s is often too short for non-trivial tasks.",
+  "systemHint": "You can manage Exocortex conversations and do scripted LLM calls with the `exo` CLI (source at ~/Workspace/Exocortex/external-tools/exo-cli). Run `exo -h` for usage reference. Canonical commands: `exo send`, `exo list`, `exo info`, `exo history`, `exo delete`, `exo abort`, `exo queue`, `exo rename`, `exo llm`, `exo status`, `exo help`. Small Unix-style aliases are available only for `ls -> list`, `rm -> delete`, and `mv -> rename`.\nUse `exo send` to spawn or continue conversation subagents. Subagent conversations can take a long time; pass an appropriate --timeout: 300 (5 min) for simple lookups/questions, 600-1800 (10-30 min) for moderate coding/research tasks, and up to 3600 (1 hour) for complex multi-step work. `exo llm` is a synchronous one-shot utility and does not create a persisted conversation.",
   "display": {
     "label": "Exocortex",
     "color": "#1d9bf0"

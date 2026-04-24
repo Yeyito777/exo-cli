@@ -18,16 +18,20 @@ Send messages:
   cat file | exo send -                             Read from stdin
 
 commands:
-  send         Send a message (aliases: ask, chat, a)
-  ls           List conversations
+  send         Send a message
+  list         List conversations
   info         Conversation metadata
   history      Conversation history
-  rm           Delete a conversation
-  abort        Abort in-flight stream
+  delete       Delete a conversation
+  abort        Abort an in-flight stream
+  queue        Queue a message for delivery
   rename       Rename a conversation
   llm          One-shot LLM (no conversation)
   status       Check daemon health
   help         Show this help
+
+aliases:
+  ls -> list        rm -> delete        mv -> rename
 
 flags:
   --opus, --sonnet, --haiku         Claude model shortcuts
@@ -42,8 +46,8 @@ flags:
   --system <prompt>                 System prompt (for llm)
 
 subagent timeouts:
-  Subagent conversations (sending tasks to the AI) can take a long time.
-  Always pass --timeout appropriate to the task complexity:
+  Subagent conversations (usually via exo send) can take a long time.
+  Pass --timeout appropriate to the task complexity:
     Simple lookups/questions:         --timeout 300   (5 min)
     Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
     Complex multi-step work:          --timeout 3600  (1 hour)

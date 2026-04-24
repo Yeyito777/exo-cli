@@ -194,9 +194,9 @@ export async function send(
   return 0;
 }
 
-// ── ls ──────────────────────────────────────────────────────────────
+// ── list ────────────────────────────────────────────────────────────
 
-export async function ls(conn: Connection, opts: OutputOptions): Promise<number> {
+export async function list(conn: Connection, opts: OutputOptions): Promise<number> {
   const reqId = nextReqId();
   const event = await conn.request<ConversationsListEvent>(
     { type: "list_conversations", reqId },
@@ -297,9 +297,9 @@ export async function history(conn: Connection, convId: string, opts: OutputOpti
   return 0;
 }
 
-// ── rm ──────────────────────────────────────────────────────────────
+// ── delete ──────────────────────────────────────────────────────────
 
-export async function rm(conn: Connection, convId: string): Promise<number> {
+export async function deleteConversation(conn: Connection, convId: string): Promise<number> {
   const reqId = nextReqId();
   await conn.request<ConversationDeletedEvent>(
     { type: "delete_conversation", reqId, convId },

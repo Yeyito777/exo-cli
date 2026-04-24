@@ -8,10 +8,10 @@
  * Usage:
  *   exo send "message"              Send a message (new conversation)
  *   exo send "follow up" -c <id>    Continue a conversation
- *   exo ls                          List conversations
+ *   exo list                        List conversations
  *   exo info <id>                   Show conversation metadata
  *   exo history <id>                Show conversation history
- *   exo rm <id>                     Delete a conversation
+ *   exo delete <id>                 Delete a conversation
  *   exo abort <id>                  Abort in-flight stream
  *   exo rename <id> <title>         Rename a conversation
  *   exo llm "text" --system "..."   One-shot LLM completion
@@ -31,7 +31,7 @@
  */
 
 import { Connection } from "./conn";
-import { send, ls, info, history, rm, abort, queue, rename, llm, status, type OutputOptions } from "./commands";
+import { send, list, info, history, deleteConversation, abort, queue, rename, llm, status, type OutputOptions } from "./commands";
 import { printHelp, printCommandHelp, hasCommandHelp } from "./help";
 import { inferProviderForModel, isProviderId, normalizeModelForProvider, parseModelSpecifier } from "./model-spec";
 import { setRepoRootOverride, setWorktreeOverride, sourceRepoRoot, worktreeName } from "./shared/paths";
@@ -39,26 +39,13 @@ import type { ModelId, ProviderId } from "./shared/protocol";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
-const SUBCOMMANDS = new Set(["send", "ls", "info", "history", "rm", "abort", "queue", "rename", "llm", "status", "help"]);
+const SUBCOMMANDS = new Set(["send", "list", "info", "history", "delete", "abort", "queue", "rename", "llm", "status", "help"]);
 
-// Aliases → canonical subcommand name
+// Small Unix-style aliases only. Canonical commands are listed above.
 const ALIASES: Record<string, string> = {
-  list: "ls",
-  delete: "rm",
-  remove: "rm",
-  del: "rm",
-  kill: "abort",
-  cancel: "abort",
+  ls: "list",
+  rm: "delete",
   mv: "rename",
-  title: "rename",
-  ping: "status",
-  health: "status",
-  log: "history",
-  show: "info",
-  chat: "send",
-  ask: "send",
-  a: "send",
-  one: "llm",          // "exo one 'quick question'" as shorthand for llm
 };
 
 interface ParsedArgs {
@@ -219,7 +206,7 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  // --help flag on a subcommand: exo ls --help
+  // --help flag on a subcommand: exo list --help
   if (args.wantsHelp) {
     if (args.subcommand && hasCommandHelp(args.subcommand)) {
       printCommandHelp(args.subcommand);
@@ -279,8 +266,8 @@ async function main(): Promise<number> {
 
   try {
     switch (args.subcommand) {
-      case "ls":
-        return await ls(conn, opts);
+      case "list":
+        return await list(conn, opts);
 
       case "status":
         return await status(conn, opts);
@@ -297,10 +284,10 @@ async function main(): Promise<number> {
         return await history(conn, convId, opts);
       }
 
-      case "rm": {
+      case "delete": {
         const convId = args.positionals[0];
-        if (!convId) { process.stderr.write("Usage: exo rm <convId>\n"); return 1; }
-        return await rm(conn, convId);
+        if (!convId) { process.stderr.write("Usage: exo delete <convId>\nRun 'exo delete --help' for details.\n"); return 1; }
+        return await deleteConversation(conn, convId);
       }
 
       case "abort": {

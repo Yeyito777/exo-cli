@@ -32,17 +32,20 @@ ${b("USAGE")}
   cat file | exo send -                             Read message from stdin
 
 ${b("COMMANDS")}
-  send (ask, chat, a) "message"     Send a message to the AI
-  ls (list)                         List conversations
-  info (show) <id>                  Conversation metadata
-  history (log) <id>                Conversation history
-  rm (delete, del) <id>             Delete a conversation
-  abort (kill, cancel) <id>         Abort in-flight stream
-  queue <id> "msg" [--end]         Queue message for delivery
-  rename (mv, title) <id> <title>   Rename a conversation
-  llm (one) "text" --system "..."   One-shot LLM (no conversation)
-  status (ping)                     Check if daemon is running
-  help                              Show this help
+  send "message"                    Send a message to the AI
+  list                              List conversations
+  info <id>                         Conversation metadata
+  history <id>                      Conversation history
+  delete <id>                       Delete a conversation
+  abort <id>                        Abort an in-flight stream
+  queue <id> "msg" [--end]          Queue message for delivery
+  rename <id> <title>               Rename a conversation
+  llm "text" --system "..."         One-shot LLM (no conversation)
+  status                            Check if daemon is running
+  help [command]                    Show help
+
+${b("ALIASES")}
+  ls -> list        rm -> delete        mv -> rename
 
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
@@ -56,8 +59,8 @@ ${MODEL_FLAG_SUMMARY}
   --system <prompt>                 System prompt (for llm)
 
 ${b("SUBAGENT TIMEOUTS")}
-  Subagent conversations (sending tasks to the AI) can take a long time.
-  Always pass --timeout appropriate to the task complexity:
+  Subagent conversations (usually via exo send) can take a long time.
+  Pass --timeout appropriate to the task complexity:
     Simple lookups/questions:         --timeout 300   (5 min)
     Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
     Complex multi-step work:          --timeout 3600  (1 hour)
@@ -70,7 +73,6 @@ const COMMAND_HELP: Record<string, string> = {
   send: `${b("exo send")} "message" [flags]
 
 Send a message to the AI. Creates a new conversation unless -c is given.
-Aliases: ask, chat, a
 
 ${b("USAGE")}
   exo send "what is 2+2"                          New conversation
@@ -91,8 +93,8 @@ ${MODEL_FLAG_SUMMARY_SEND}
   --timeout <sec>                   Max wait time (default 300)
 
 ${b("SUBAGENT TIMEOUTS")}
-  Subagent conversations (sending tasks to the AI) can take a long time.
-  Always pass --timeout appropriate to the task complexity:
+  Subagent conversations can take a long time. Pass --timeout appropriate
+  to the task complexity:
     Simple lookups/questions:         --timeout 300   (5 min)
     Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
     Complex multi-step work:          --timeout 3600  (1 hour)
@@ -102,9 +104,14 @@ ${b("OUTPUT")}
   Thinking blocks and tool result output are hidden unless --full is given.
 `,
 
-  ls: `${b("exo ls")} [flags]
+  list: `${b("exo list")} [flags]
 
 List all conversations.
+Alias: ls
+
+${b("USAGE")}
+  exo list
+  exo list --json
 
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
@@ -150,12 +157,13 @@ ${b("OUTPUT")}
   Tool calls shown as summaries. Thinking and tool results hidden unless --full.
 `,
 
-  rm: `${b("exo rm")} <id>
+  delete: `${b("exo delete")} <id>
 
 Delete a conversation. The daemon soft-deletes to trash.
+Alias: rm
 
 ${b("USAGE")}
-  exo rm <convId>
+  exo delete <convId>
 
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
@@ -193,6 +201,7 @@ ${INSTANCE_FLAG_SUMMARY}
   rename: `${b("exo rename")} <id> <title>
 
 Rename a conversation.
+Alias: mv
 
 ${b("USAGE")}
   exo rename <convId> "new title"
@@ -238,24 +247,11 @@ ${MODEL_FLAG_SUMMARY_SEND}
 `,
 };
 
-// Resolve aliases for help lookups
+// Resolve the small Unix-style alias set for help lookups.
 const HELP_ALIASES: Record<string, string> = {
-  list: "ls",
-  delete: "rm",
-  remove: "rm",
-  del: "rm",
-  kill: "abort",
-  cancel: "abort",
+  ls: "list",
+  rm: "delete",
   mv: "rename",
-  title: "rename",
-  ping: "status",
-  health: "status",
-  log: "history",
-  show: "info",
-  chat: "send",
-  ask: "send",
-  a: "send",
-  one: "llm",
 };
 
 function resolveHelp(command: string): string {

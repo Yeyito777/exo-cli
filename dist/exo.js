@@ -1,41 +1,46 @@
+// @bun
 // src/conn.ts
 import { connect } from "net";
 import { existsSync } from "fs";
 
 // src/shared/paths.ts
-import { execSync } from "child_process";
-import { join, basename, resolve } from "path";
-var REPO_ROOT = resolve(import.meta.dir, "../../../..");
-var CONFIG_DIR = join(REPO_ROOT, "config");
-var _worktreeName;
-function detectWorktree() {
-  if (_worktreeName !== undefined)
-    return _worktreeName;
-  try {
-    const gitDir = execSync("git rev-parse --git-dir", {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
-    }).trim();
-    const gitCommonDir = execSync("git rev-parse --git-common-dir", {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
-    }).trim();
-    if (resolve(gitDir) !== resolve(gitCommonDir)) {
-      _worktreeName = basename(gitDir);
-    } else {
-      _worktreeName = null;
-    }
-  } catch {
-    _worktreeName = null;
-  }
-  return _worktreeName;
+import { join, resolve } from "path";
+var SOURCE_REPO_ROOT = resolve(import.meta.dir, "../../../..");
+var _worktreeOverride = null;
+var _repoRootOverride = null;
+function effectiveRepoRoot() {
+  return _repoRootOverride ?? SOURCE_REPO_ROOT;
+}
+function effectiveWorktreeName() {
+  return _worktreeOverride;
+}
+function configDirForRoot(root) {
+  return join(root, "config");
+}
+function repoRoot() {
+  return effectiveRepoRoot();
+}
+function configDir() {
+  return configDirForRoot(repoRoot());
 }
 function runtimeDir() {
-  const wt = detectWorktree();
-  return wt ? join(CONFIG_DIR, "runtime", wt) : join(CONFIG_DIR, "runtime");
+  const wt = effectiveWorktreeName();
+  return wt ? join(configDir(), "runtime", wt) : join(configDir(), "runtime");
 }
 function socketPath() {
   return join(runtimeDir(), "exocortexd.sock");
+}
+function worktreeName() {
+  return effectiveWorktreeName();
+}
+function setWorktreeOverride(name) {
+  _worktreeOverride = name && name.trim() ? name.trim() : null;
+}
+function setRepoRootOverride(path) {
+  _repoRootOverride = path && path.trim() ? resolve(path.trim()) : null;
+}
+function sourceRepoRoot() {
+  return SOURCE_REPO_ROOT;
 }
 
 // src/conn.ts
@@ -45,8 +50,10 @@ class Connection {
   listeners = [];
   async connect() {
     const path = socketPath();
+    const instance = worktreeName();
     if (!existsSync(path)) {
-      throw new Error(`exocortexd socket not found. Is the daemon running?
+      const target = instance ? ` for instance '${instance}'` : "";
+      throw new Error(`exocortexd socket${target} not found. Is the daemon running?
 ` + "Start it with: cd daemon && bun run start");
     }
     return new Promise((resolve2, reject) => {
@@ -128,6 +135,64 @@ class Connection {
   }
 }
 
+// src/model-spec.ts
+var ANTHROPIC_ALIASES = {
+  opus: "claude-opus-4-6",
+  "opus-4.6": "claude-opus-4-6",
+  "claude-opus-4-6": "claude-opus-4-6",
+  sonnet: "claude-sonnet-4-6",
+  "sonnet-4.6": "claude-sonnet-4-6",
+  "claude-sonnet-4-6": "claude-sonnet-4-6",
+  haiku: "claude-haiku-4-5-20251001",
+  "haiku-4.5": "claude-haiku-4-5-20251001",
+  "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001"
+};
+function isProviderId(value) {
+  return value === "anthropic" || value === "openai";
+}
+function inferProviderForModel(model) {
+  if (!model)
+    return;
+  const lowered = model.trim().toLowerCase();
+  return lowered in ANTHROPIC_ALIASES ? "anthropic" : undefined;
+}
+function normalizeModelForProvider(provider, model) {
+  const trimmed = model.trim();
+  const lowered = trimmed.toLowerCase();
+  if (provider === "anthropic" || provider === null) {
+    const anthropic = ANTHROPIC_ALIASES[lowered];
+    if (anthropic)
+      return anthropic;
+  }
+  return trimmed;
+}
+function parseModelSpecifier(spec) {
+  const trimmed = spec.trim();
+  if (!trimmed) {
+    throw new Error("--model requires a non-empty value");
+  }
+  const slash = trimmed.indexOf("/");
+  if (slash !== -1) {
+    const providerPart = trimmed.slice(0, slash).trim().toLowerCase();
+    const modelPart = trimmed.slice(slash + 1).trim();
+    if (!isProviderId(providerPart)) {
+      throw new Error(`Unknown provider in model spec: ${providerPart}`);
+    }
+    if (!modelPart) {
+      throw new Error(`Missing model name after provider in --model ${JSON.stringify(spec)}`);
+    }
+    return {
+      provider: providerPart,
+      model: normalizeModelForProvider(providerPart, modelPart)
+    };
+  }
+  const anthropic = ANTHROPIC_ALIASES[trimmed.toLowerCase()];
+  if (anthropic) {
+    return { provider: "anthropic", model: anthropic };
+  }
+  return { provider: null, model: trimmed };
+}
+
 // src/collect.ts
 function collectResponse(conn, convId, text, timeoutMs, onStream) {
   return new Promise((resolve2, reject) => {
@@ -139,7 +204,7 @@ function collectResponse(conn, convId, text, timeoutMs, onStream) {
       reject(new Error("Timeout waiting for response"));
     }, timeoutMs);
     const waitHint = setTimeout(() => {
-      process.stderr.write(`waiting for response…
+      process.stderr.write(`waiting for response\u2026
 `);
     }, 5000);
     const handler = (event) => {
@@ -190,11 +255,11 @@ function formatBlocksAsText(blocks, full) {
         parts.push(block.text);
         break;
       case "tool_call":
-        parts.push(`  ╸ ${block.summary}`);
+        parts.push(`  \u2578 ${block.summary}`);
         break;
       case "tool_result":
         if (full) {
-          const prefix = block.isError ? "  ✗ " : "  ┃ ";
+          const prefix = block.isError ? "  \u2717 " : "  \u2503 ";
           const indented = block.output.split(`
 `).map((l) => prefix + l).join(`
 `);
@@ -224,17 +289,17 @@ function formatEntriesAsText(entries, full) {
   for (const entry of entries) {
     switch (entry.type) {
       case "user":
-        parts.push(`\x1B[1;34m▶ You\x1B[0m`);
+        parts.push(`\x1B[1;34m\u25B6 You\x1B[0m`);
         parts.push(entry.text);
         parts.push("");
         break;
       case "ai":
-        parts.push(`\x1B[1;32m▶ Assistant\x1B[0m`);
+        parts.push(`\x1B[1;32m\u25B6 Assistant\x1B[0m`);
         parts.push(formatBlocksAsText(entry.blocks, full));
         parts.push("");
         break;
       case "system":
-        parts.push(`\x1B[1;33m▶ System\x1B[0m ${entry.text}`);
+        parts.push(`\x1B[1;33m\u25B6 System\x1B[0m ${entry.text}`);
         parts.push("");
         break;
     }
@@ -252,7 +317,7 @@ function nextReqId() {
   return `cli_${++reqCounter}_${Date.now()}`;
 }
 function truncate(s, max) {
-  return s.length <= max ? s : s.slice(0, max - 1) + "…";
+  return s.length <= max ? s : s.slice(0, max - 1) + "\u2026";
 }
 function autoTitle(text) {
   const firstLine = text.split(`
@@ -294,14 +359,14 @@ function makeLiveStreamCallback(targetConvId, full) {
         if (!atLineStart)
           process.stdout.write(`
 `);
-        process.stdout.write(`  ╸ ${event.summary}
+        process.stdout.write(`  \u2578 ${event.summary}
 `);
         wroteAnything = true;
         atLineStart = true;
         break;
       case "tool_result":
         if (full) {
-          const prefix = event.isError ? "  ✗ " : "  ┃ ";
+          const prefix = event.isError ? "  \u2717 " : "  \u2503 ";
           const indented = event.output.split(`
 `).map((l) => prefix + l).join(`
 `);
@@ -313,14 +378,15 @@ function makeLiveStreamCallback(targetConvId, full) {
     }
   };
 }
-async function send(conn, text, convId, model, opts) {
+async function send(conn, text, convId, provider, model, opts) {
+  const resolvedProvider = provider ?? inferProviderForModel(model);
   if (!convId) {
     const reqId = nextReqId();
     const title = autoTitle(text);
-    const created = await conn.request({ type: "new_conversation", reqId, model: model ?? undefined, title }, (e) => e.type === "conversation_created" && e.reqId === reqId);
+    const created = await conn.request({ type: "new_conversation", reqId, provider: resolvedProvider ?? undefined, model: model ?? undefined, title }, (e) => e.type === "conversation_created" && e.reqId === reqId);
     convId = created.convId;
   } else if (model) {
-    conn.send({ type: "set_model", convId, model });
+    conn.send({ type: "set_model", convId, provider: resolvedProvider ?? undefined, model });
   }
   conn.send({ type: "subscribe", convId });
   const liveText = !opts.json && !opts.stream && !opts.idOnly;
@@ -330,7 +396,19 @@ async function send(conn, text, convId, model, opts) {
 `);
     }
   } : liveText ? makeLiveStreamCallback(convId, opts.full) : undefined;
-  const response = await collectResponse(conn, convId, text, opts.timeout, onStream);
+  let response;
+  try {
+    response = await collectResponse(conn, convId, text, opts.timeout, onStream);
+  } catch (err) {
+    if (convId && err?.message?.includes("Already streaming")) {
+      const reqId = nextReqId();
+      await conn.request({ type: "queue_message", reqId, convId, text, timing: "next-turn" }, (e) => e.type === "ack" && e.reqId === reqId);
+      process.stdout.write(`Conversation is busy \u2014 message queued for next turn.
+`);
+      return 0;
+    }
+    throw err;
+  }
   try {
     conn.send({ type: "unsubscribe", convId });
   } catch {}
@@ -347,7 +425,7 @@ exo:${response.convId}
   }
   return 0;
 }
-async function ls(conn, opts) {
+async function list(conn, opts) {
   const reqId = nextReqId();
   const event = await conn.request({ type: "list_conversations", reqId }, (e) => e.type === "conversations_list" && e.reqId === reqId);
   if (opts.json) {
@@ -359,8 +437,8 @@ async function ls(conn, opts) {
 `);
     } else {
       for (const c of event.conversations) {
-        const prefix = c.pinned ? "\uD83D\uDCCC" : c.marked ? "★ " : "  ";
-        const streaming = c.streaming ? " ⟳" : "";
+        const prefix = c.pinned ? "\uD83D\uDCCC" : c.marked ? "\u2605 " : "  ";
+        const streaming = c.streaming ? " \u27F3" : "";
         const title = c.title || "(untitled)";
         const date = new Date(c.updatedAt).toLocaleString();
         process.stdout.write(`${prefix}${c.id}  ${c.model}  ${c.messageCount} msgs  ${title}  ${date}${streaming}
@@ -435,7 +513,7 @@ async function history(conn, convId, opts) {
   }
   return 0;
 }
-async function rm(conn, convId) {
+async function deleteConversation(conn, convId) {
   const reqId = nextReqId();
   await conn.request({ type: "delete_conversation", reqId, convId }, (e) => e.type === "conversation_deleted" && e.convId === convId);
   process.stdout.write(`Deleted ${convId}
@@ -449,6 +527,13 @@ async function abort(conn, convId) {
 `);
   return 0;
 }
+async function queue(conn, convId, text, timing) {
+  const reqId = nextReqId();
+  await conn.request({ type: "queue_message", reqId, convId, text, timing }, (e) => e.type === "ack" && e.reqId === reqId);
+  process.stdout.write(`Queued (${timing}) for ${convId}
+`);
+  return 0;
+}
 async function rename(conn, convId, title) {
   const reqId = nextReqId();
   await conn.request({ type: "rename_conversation", reqId, convId, title }, (e) => e.type === "conversation_updated" && e.summary.id === convId);
@@ -456,9 +541,10 @@ async function rename(conn, convId, title) {
 `);
   return 0;
 }
-async function llm(conn, userText, system, model, opts) {
+async function llm(conn, userText, system, provider, model, opts) {
   const reqId = nextReqId();
-  const event = await conn.request({ type: "llm_complete", reqId, system, userText, model: model ?? undefined }, (e) => e.type === "llm_complete_result" && e.reqId === reqId, opts.timeout);
+  const resolvedProvider = provider ?? inferProviderForModel(model);
+  const event = await conn.request({ type: "llm_complete", reqId, provider: resolvedProvider ?? undefined, system, userText, model: model ?? undefined }, (e) => e.type === "llm_complete_result" && e.reqId === reqId, opts.timeout);
   if (opts.json) {
     process.stdout.write(JSON.stringify({ text: event.text }) + `
 `);
@@ -466,13 +552,6 @@ async function llm(conn, userText, system, model, opts) {
     process.stdout.write(event.text + `
 `);
   }
-  return 0;
-}
-async function rescan(conn) {
-  const reqId = nextReqId();
-  const event = await conn.request({ type: "rescan_conversations", reqId }, (e) => e.type === "conversations_list" && e.reqId === reqId);
-  process.stdout.write(`Rescanned: ${event.conversations.length} conversation(s) total
-`);
   return 0;
 }
 async function status(conn, opts) {
@@ -507,30 +586,46 @@ async function status(conn, opts) {
 
 // src/help.ts
 var b = (s) => `\x1B[1m${s}\x1B[0m`;
+var INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target a specific worktree daemon instance`;
+var MODEL_FLAG_SUMMARY = `  --opus, --sonnet, --haiku         Claude model shortcuts
+  --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
+                                    claude-opus-4-6 | openai/gpt-5.5
+  --provider <id>                   Provider: anthropic | openai`;
+var MODEL_FLAG_SUMMARY_SEND = `  --opus, --sonnet, --haiku         Claude model shortcuts
+  --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
+                                    claude-opus-4-6 | openai/gpt-5.5
+  --provider <id>                   Provider: anthropic | openai`;
 function printHelp() {
-  process.stdout.write(`${b("exo")} — Exocortex CLI client
+  process.stdout.write(`${b("exo")} \u2014 Exocortex CLI client
 
 ${b("USAGE")}
-  exo "message"                     Send a message (new conversation)
-  exo "message" -c <id>             Continue a conversation
-  exo "message" --opus              Use a specific model
-  cat file | exo -                  Read message from stdin
+  exo send "message"                               New conversation
+  exo send "message" -c <id>                       Continue a conversation
+  exo send "message" --opus                        Claude Opus shortcut
+  exo send "message" --model anthropic/opus-4.6    Explicit model
+  exo send "message" --provider openai --model gpt-5.4-mini
+  exo status --instance browse-links                Talk to a worktree daemon
+  cat file | exo send -                             Read message from stdin
 
 ${b("COMMANDS")}
-  ls (list)                         List conversations
-  info (show) <id>                  Conversation metadata
-  history (log) <id>                Conversation history
-  rm (delete, del) <id>             Delete a conversation
-  abort (kill, cancel) <id>         Abort in-flight stream
-  rename (mv, title) <id> <title>   Rename a conversation
-  llm "text" --system "prompt"      One-shot LLM (no conversation)
-  status (ping)                     Check if daemon is running
-  help                              Show this help
+  send "message"                    Send a message to the AI
+  list                              List conversations
+  info <id>                         Conversation metadata
+  history <id>                      Conversation history
+  delete <id>                       Delete a conversation
+  abort <id>                        Abort an in-flight stream
+  queue <id> "msg" [--end]          Queue message for delivery
+  rename <id> <title>               Rename a conversation
+  llm "text" --system "..."         One-shot LLM (no conversation)
+  status                            Check if daemon is running
+  help [command]                    Show help
+
+${b("ALIASES")}
+  ls -> list        rm -> delete        mv -> rename
 
 ${b("FLAGS")}
-  --opus, --sonnet, --haiku         Model selection (default: opus)
-                                    opus for complex/quality-critical tasks,
-                                    sonnet for routine code, haiku for lookups
+${INSTANCE_FLAG_SUMMARY}
+${MODEL_FLAG_SUMMARY}
   -c, --conv <id>                   Conversation ID
   --json                            Structured JSON output
   --full                            Include thinking + tool results
@@ -540,8 +635,8 @@ ${b("FLAGS")}
   --system <prompt>                 System prompt (for llm)
 
 ${b("SUBAGENT TIMEOUTS")}
-  Subagent conversations (sending tasks to the AI) can take a long time.
-  Always pass --timeout appropriate to the task complexity:
+  Subagent conversations (usually via exo send) can take a long time.
+  Pass --timeout appropriate to the task complexity:
     Simple lookups/questions:         --timeout 300   (5 min)
     Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
     Complex multi-step work:          --timeout 3600  (1 hour)
@@ -550,20 +645,22 @@ Run ${b("exo <command> --help")} for command-specific usage.
 `);
 }
 var COMMAND_HELP = {
-  send: `${b("exo")} "message" [flags]
+  send: `${b("exo send")} "message" [flags]
 
 Send a message to the AI. Creates a new conversation unless -c is given.
 
 ${b("USAGE")}
-  exo "what is 2+2"                 New conversation, default model
-  exo "explain this" --opus         New conversation, specific model
-  exo "follow up" -c <id>           Continue existing conversation
-  cat prompt.txt | exo -            Read message from stdin
-  echo "question" | exo - -c <id>   Stdin + continue conversation
+  exo send "what is 2+2"                          New conversation
+  exo send "explain this" --opus                  Claude Opus shortcut
+  exo send "explain this" --model anthropic/opus-4.6
+  exo send "follow up" -c <id>                    Continue existing conversation
+  cat prompt.txt | exo send -                      Read message from stdin
+  echo "question" | exo send - -c <id>            Stdin + continue conversation
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   -c, --conv <id>                   Continue this conversation
-  --opus, --sonnet, --haiku         Model selection (default: opus)
+${MODEL_FLAG_SUMMARY_SEND}
   --json                            Output as JSON (blocks, tokens, duration)
   --full                            Include thinking blocks and tool results
   --stream                          Stream events as NDJSON as they arrive
@@ -571,8 +668,8 @@ ${b("FLAGS")}
   --timeout <sec>                   Max wait time (default 300)
 
 ${b("SUBAGENT TIMEOUTS")}
-  Subagent conversations (sending tasks to the AI) can take a long time.
-  Always pass --timeout appropriate to the task complexity:
+  Subagent conversations can take a long time. Pass --timeout appropriate
+  to the task complexity:
     Simple lookups/questions:         --timeout 300   (5 min)
     Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
     Complex multi-step work:          --timeout 3600  (1 hour)
@@ -581,16 +678,22 @@ ${b("OUTPUT")}
   Default: response text + tool call summaries, then "exo:<convId>" on the last line.
   Thinking blocks and tool result output are hidden unless --full is given.
 `,
-  ls: `${b("exo ls")} [flags]
+  list: `${b("exo list")} [flags]
 
 List all conversations.
+Alias: ls
+
+${b("USAGE")}
+  exo list
+  exo list --json
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   --json                            Output as JSON array
 
 ${b("OUTPUT")}
   Default: table with ID, model, message count, title, last updated.
-  Pinned conversations show \uD83D\uDCCC, marked conversations show ★.
+  Pinned conversations show \uD83D\uDCCC, marked conversations show \u2605.
 `,
   info: `${b("exo info")} <id> [flags]
 
@@ -601,6 +704,7 @@ ${b("USAGE")}
   exo info <convId> --json
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   --json                            Output as JSON object
 
 ${b("OUTPUT")}
@@ -616,6 +720,7 @@ ${b("USAGE")}
   exo history <convId> --json
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   --json                            Output as JSON array of display entries
   --full                            Include thinking blocks and tool results
 
@@ -623,12 +728,16 @@ ${b("OUTPUT")}
   Default: user and assistant messages with role labels.
   Tool calls shown as summaries. Thinking and tool results hidden unless --full.
 `,
-  rm: `${b("exo rm")} <id>
+  delete: `${b("exo delete")} <id>
 
 Delete a conversation. The daemon soft-deletes to trash.
+Alias: rm
 
 ${b("USAGE")}
-  exo rm <convId>
+  exo delete <convId>
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
 `,
   abort: `${b("exo abort")} <id>
 
@@ -636,13 +745,37 @@ Abort an in-flight stream for a conversation.
 
 ${b("USAGE")}
   exo abort <convId>
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
+`,
+  queue: `${b("exo queue")} <id> "message" [--end]
+
+Queue a message for delivery to a conversation. The message is held by the
+daemon and injected automatically \u2014 either before the next AI turn (default)
+or appended after the current response finishes (--end).
+
+Useful when a conversation is actively streaming and \`exo send\` would fail
+with "Already streaming".
+
+${b("USAGE")}
+  exo queue <convId> "message"           Queue for next turn (default)
+  exo queue <convId> "message" --end     Queue for message-end delivery
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
+  --end                             Deliver at message-end instead of next-turn
 `,
   rename: `${b("exo rename")} <id> <title>
 
 Rename a conversation.
+Alias: mv
 
 ${b("USAGE")}
   exo rename <convId> "new title"
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
 `,
   status: `${b("exo status")} [flags]
 
@@ -653,6 +786,7 @@ ${b("USAGE")}
   exo status --json
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   --json                            Output as JSON object
 
 ${b("OUTPUT")}
@@ -667,32 +801,21 @@ Useful for quick utility calls (classification, summarization, etc).
 ${b("USAGE")}
   exo llm "summarize this text"
   exo llm "translate to spanish" --system "You are a translator"
+  exo llm "refactor this" --model anthropic/sonnet-4.6
   cat file.txt | exo llm - --system "Summarize" --haiku
 
 ${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
   --system <prompt>                 System prompt (default: "You are a helpful assistant.")
-  --opus, --sonnet, --haiku         Model selection (default: haiku)
+${MODEL_FLAG_SUMMARY_SEND}
   --json                            Output as JSON object
   --timeout <sec>                   Max wait time (default 300)
 `
 };
 var HELP_ALIASES = {
-  list: "ls",
-  delete: "rm",
-  remove: "rm",
-  del: "rm",
-  kill: "abort",
-  cancel: "abort",
-  mv: "rename",
-  title: "rename",
-  ping: "status",
-  health: "status",
-  log: "history",
-  show: "info",
-  send: "send",
-  chat: "send",
-  ask: "send",
-  one: "llm"
+  ls: "list",
+  rm: "delete",
+  mv: "rename"
 };
 function resolveHelp(command) {
   return HELP_ALIASES[command] ?? command;
@@ -713,57 +836,83 @@ function hasCommandHelp(command) {
 }
 
 // src/main.ts
-var SUBCOMMANDS = new Set(["ls", "info", "history", "rm", "abort", "rename", "llm", "rescan", "status", "help"]);
+var SUBCOMMANDS = new Set(["send", "list", "info", "history", "delete", "abort", "queue", "rename", "llm", "status", "help"]);
 var ALIASES = {
-  list: "ls",
-  delete: "rm",
-  remove: "rm",
-  del: "rm",
-  kill: "abort",
-  cancel: "abort",
-  mv: "rename",
-  title: "rename",
-  ping: "status",
-  health: "status",
-  log: "history",
-  show: "info",
-  send: "send",
-  chat: "send",
-  ask: "send",
-  one: "llm"
+  ls: "list",
+  rm: "delete",
+  mv: "rename"
 };
-function looksLikeCommand(word) {
-  return /^[a-z][-a-z0-9]{1,15}$/.test(word) && !word.includes("/") && !word.includes(".") && !word.startsWith("http");
-}
 function parseArgs(argv) {
   const result = {
     subcommand: null,
     positionals: [],
     conv: null,
+    provider: null,
     model: null,
     system: "You are a helpful assistant.",
+    instance: null,
     json: false,
     full: false,
     stream: false,
     idOnly: false,
     timeout: 300000,
-    wantsHelp: false
+    wantsHelp: false,
+    endTiming: false,
+    parseError: null
   };
   let i = 0;
   while (i < argv.length) {
     const arg = argv[i];
-    if (arg === "--opus") {
-      result.model = "opus";
+    if (arg === "--opus" || arg === "--sonnet" || arg === "--haiku") {
+      const selection = parseModelSpecifier(arg.slice(2));
+      result.provider = selection.provider;
+      result.model = selection.model;
       i++;
       continue;
     }
-    if (arg === "--sonnet") {
-      result.model = "sonnet";
+    if (arg === "--provider") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--provider requires a value";
+        return result;
+      }
+      const provider = argv[++i].trim().toLowerCase();
+      if (!isProviderId(provider)) {
+        result.parseError = `Unknown provider: ${provider}`;
+        return result;
+      }
+      result.provider = provider;
       i++;
       continue;
     }
-    if (arg === "--haiku") {
-      result.model = "haiku";
+    if (arg === "--model") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--model requires a value";
+        return result;
+      }
+      try {
+        const spec = argv[++i];
+        if (spec.includes("/")) {
+          const selection = parseModelSpecifier(spec);
+          result.provider = selection.provider;
+          result.model = selection.model;
+        } else {
+          const model = normalizeModelForProvider(result.provider, spec);
+          result.model = model;
+          result.provider = result.provider ?? inferProviderForModel(model) ?? null;
+        }
+      } catch (err) {
+        result.parseError = err instanceof Error ? err.message : String(err);
+        return result;
+      }
+      i++;
+      continue;
+    }
+    if (arg === "--instance") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--instance requires a value";
+        return result;
+      }
+      result.instance = argv[++i].trim() || null;
       i++;
       continue;
     }
@@ -802,6 +951,11 @@ function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === "--end") {
+      result.endTiming = true;
+      i++;
+      continue;
+    }
     if (arg === "-h" || arg === "--help") {
       result.wantsHelp = true;
       i++;
@@ -816,8 +970,7 @@ function parseArgs(argv) {
       result.subcommand = result.positionals.shift();
     } else if (first in ALIASES) {
       result.positionals.shift();
-      const resolved = ALIASES[first];
-      result.subcommand = resolved === "send" ? null : resolved;
+      result.subcommand = ALIASES[first];
     }
   }
   return result;
@@ -843,16 +996,32 @@ async function main() {
   if (args.wantsHelp) {
     if (args.subcommand && hasCommandHelp(args.subcommand)) {
       printCommandHelp(args.subcommand);
-    } else if (!args.subcommand && args.positionals.length === 0) {
-      printHelp();
     } else {
-      printCommandHelp("send");
+      printHelp();
     }
     return 0;
   }
-  if (args.positionals.length === 0 && !args.subcommand) {
+  if (args.parseError) {
+    process.stderr.write(`Error: ${args.parseError}
+
+`);
+    printHelp();
+    return 1;
+  }
+  if (!args.subcommand && args.positionals.length === 0) {
     printHelp();
     return 0;
+  }
+  if (!args.subcommand && args.positionals.length > 0) {
+    process.stderr.write(`Unknown command: ${args.positionals[0]}
+
+`);
+    printHelp();
+    return 1;
+  }
+  if (args.instance) {
+    setWorktreeOverride(args.instance);
+    setRepoRootOverride(`${sourceRepoRoot()}/.worktrees/${args.instance}`);
   }
   const opts = {
     json: args.json,
@@ -869,14 +1038,19 @@ async function main() {
 `);
     return 2;
   }
+  if (!args.json) {
+    const target = worktreeName();
+    if (args.instance && target) {
+      process.stderr.write(`exo: targeting instance '${target}'
+`);
+    }
+  }
   try {
     switch (args.subcommand) {
-      case "ls":
-        return await ls(conn, opts);
+      case "list":
+        return await list(conn, opts);
       case "status":
         return await status(conn, opts);
-      case "rescan":
-        return await rescan(conn);
       case "info": {
         const convId = args.positionals[0];
         if (!convId) {
@@ -897,14 +1071,15 @@ Run 'exo history --help' for details.
         }
         return await history(conn, convId, opts);
       }
-      case "rm": {
+      case "delete": {
         const convId = args.positionals[0];
         if (!convId) {
-          process.stderr.write(`Usage: exo rm <convId>
+          process.stderr.write(`Usage: exo delete <convId>
+Run 'exo delete --help' for details.
 `);
           return 1;
         }
-        return await rm(conn, convId);
+        return await deleteConversation(conn, convId);
       }
       case "abort": {
         const convId = args.positionals[0];
@@ -934,9 +1109,21 @@ Run 'exo llm --help' for details.
 `);
           return 1;
         }
-        return await llm(conn, text, args.system, args.model, opts);
+        return await llm(conn, text, args.system, args.provider, args.model, opts);
       }
-      default: {
+      case "queue": {
+        const convId = args.positionals[0];
+        const text = args.positionals.slice(1).join(" ");
+        if (!convId || !text) {
+          process.stderr.write(`Usage: exo queue <convId> "message" [--end]
+Run 'exo queue --help' for details.
+`);
+          return 1;
+        }
+        const timing = args.endTiming ? "message-end" : "next-turn";
+        return await queue(conn, convId, text, timing);
+      }
+      case "send": {
         let text;
         if (args.positionals.length === 1 && args.positionals[0] === "-") {
           text = await readStdin();
@@ -944,21 +1131,19 @@ Run 'exo llm --help' for details.
           text = args.positionals.join(" ");
         }
         if (!text) {
-          printHelp();
-          return 0;
-        }
-        if (args.positionals.length <= 3 && args.positionals.every((w) => looksLikeCommand(w)) && !args.conv) {
-          const allCommands = [...SUBCOMMANDS].filter((c) => c !== "help").concat(Object.keys(ALIASES));
-          process.stderr.write(`Unknown command: ${text}
-` + `Available commands: ${[...SUBCOMMANDS].filter((c) => c !== "help").join(", ")}
-` + `Aliases: ${Object.entries(ALIASES).map(([a, c]) => `${a}→${c}`).join(", ")}
-
-` + `If you meant to send this as a message, quote it:
-` + `  exo "${text}"
+          process.stderr.write(`Usage: exo send "message"
+Run 'exo send --help' for details.
 `);
           return 1;
         }
-        return await send(conn, text, args.conv, args.model, opts);
+        return await send(conn, text, args.conv, args.provider, args.model, opts);
+      }
+      default: {
+        process.stderr.write(`Unknown command: ${args.subcommand}
+
+`);
+        printHelp();
+        return 1;
       }
     }
   } catch (err) {
