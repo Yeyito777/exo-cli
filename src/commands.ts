@@ -28,6 +28,8 @@ export interface OutputOptions {
   stream: boolean;
   idOnly: boolean;
   timeout: number;
+  detached?: boolean;
+  notifyParent?: string | null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -138,6 +140,36 @@ export async function send(
   } else if (model) {
     // Switch model on existing conversation
     conn.send({ type: "set_model", convId, provider: resolvedProvider ?? undefined, model });
+  }
+
+  if (opts.detached) {
+    const reqId = nextReqId();
+    const notifyParent = opts.notifyParent
+      ? { convId: opts.notifyParent }
+      : undefined;
+    await conn.request<AckEvent>(
+      {
+        type: "send_message",
+        reqId,
+        convId,
+        text,
+        startedAt: Date.now(),
+        detached: true,
+        notifyParent,
+      },
+      (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+    );
+    if (opts.idOnly) {
+      process.stdout.write(convId + "\n");
+    } else if (opts.json) {
+      process.stdout.write(JSON.stringify({ convId, detached: true, notifyParent: notifyParent?.convId ?? null }) + "\n");
+    } else {
+      const notifyText = notifyParent
+        ? ` Parent will be notified when it completes.`
+        : ` No parent notification configured.`;
+      process.stdout.write(`Started detached subagent exo:${convId}.${notifyText}\n`);
+    }
+    return 0;
   }
 
   // Subscribe to get streaming events

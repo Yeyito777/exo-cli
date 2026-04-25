@@ -388,6 +388,31 @@ async function send(conn, text, convId, provider, model, opts) {
   } else if (model) {
     conn.send({ type: "set_model", convId, provider: resolvedProvider ?? undefined, model });
   }
+  if (opts.detached) {
+    const reqId = nextReqId();
+    const notifyParent = opts.notifyParent ? { convId: opts.notifyParent } : undefined;
+    await conn.request({
+      type: "send_message",
+      reqId,
+      convId,
+      text,
+      startedAt: Date.now(),
+      detached: true,
+      notifyParent
+    }, (e) => e.type === "ack" && e.reqId === reqId);
+    if (opts.idOnly) {
+      process.stdout.write(convId + `
+`);
+    } else if (opts.json) {
+      process.stdout.write(JSON.stringify({ convId, detached: true, notifyParent: notifyParent?.convId ?? null }) + `
+`);
+    } else {
+      const notifyText = notifyParent ? ` Parent will be notified when it completes.` : ` No parent notification configured.`;
+      process.stdout.write(`Started detached subagent exo:${convId}.${notifyText}
+`);
+    }
+    return 0;
+  }
   conn.send({ type: "subscribe", convId });
   const liveText = !opts.json && !opts.stream && !opts.idOnly;
   const onStream = opts.stream ? (event) => {
@@ -633,13 +658,16 @@ ${MODEL_FLAG_SUMMARY}
   --id                              Print only conversation ID
   --timeout <sec>                   Max wait time (default 300)
   --system <prompt>                 System prompt (for llm)
+  --detach, --background            Start exo send and return immediately
+  --foreground                      Disable parent-agent auto-detach for send
+  --notify-parent <id>              Notify a parent conversation on send completion
+  --no-notify                       Detach send without parent notification
 
-${b("SUBAGENT TIMEOUTS")}
-  Subagent conversations (usually via exo send) can take a long time.
-  Pass --timeout appropriate to the task complexity:
-    Simple lookups/questions:         --timeout 300   (5 min)
-    Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
-    Complex multi-step work:          --timeout 3600  (1 hour)
+${b("SUBAGENTS")}
+  \`exo send\` starts or continues persisted conversation subagents. From inside
+  an Exocortex parent conversation it auto-detaches and notifies the parent
+  when done. \`--timeout\` controls how long this CLI waits; detached children
+  continue in the daemon until they finish or are aborted.
 
 Run ${b("exo <command> --help")} for command-specific usage.
 `);
@@ -666,13 +694,19 @@ ${MODEL_FLAG_SUMMARY_SEND}
   --stream                          Stream events as NDJSON as they arrive
   --id                              Print only the conversation ID
   --timeout <sec>                   Max wait time (default 300)
+  --detach, --background            Start the turn and return immediately
+  --foreground                      Disable parent-agent auto-detach
+  --notify-parent <id>              Notify a parent conversation on completion
+  --no-notify                       Detach without parent notification
 
-${b("SUBAGENT TIMEOUTS")}
-  Subagent conversations can take a long time. Pass --timeout appropriate
-  to the task complexity:
-    Simple lookups/questions:         --timeout 300   (5 min)
-    Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
-    Complex multi-step work:          --timeout 3600  (1 hour)
+${b("SUBAGENT BEHAVIOR")}
+  When exo send is called from inside an Exocortex parent conversation, it
+  automatically runs detached and the daemon notifies the parent when done.
+
+${b("SUBAGENT RUNTIME")}
+  Detached sends return after the daemon accepts the turn. Use \`exo abort <id>\`
+  to stop a detached child conversation if needed. In foreground mode,
+  --timeout controls how long this CLI waits for the response.
 
 ${b("OUTPUT")}
   Default: response text + tool call summaries, then "exo:<convId>" on the last line.
@@ -858,6 +892,10 @@ function parseArgs(argv) {
     timeout: 300000,
     wantsHelp: false,
     endTiming: false,
+    detach: false,
+    foreground: false,
+    notifyParent: null,
+    noNotify: false,
     parseError: null
   };
   let i = 0;
@@ -956,6 +994,30 @@ function parseArgs(argv) {
       i++;
       continue;
     }
+    if (arg === "--detach" || arg === "--background") {
+      result.detach = true;
+      i++;
+      continue;
+    }
+    if (arg === "--foreground") {
+      result.foreground = true;
+      i++;
+      continue;
+    }
+    if (arg === "--no-notify") {
+      result.noNotify = true;
+      i++;
+      continue;
+    }
+    if (arg === "--notify-parent") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--notify-parent requires a conversation ID";
+        return result;
+      }
+      result.notifyParent = argv[++i];
+      i++;
+      continue;
+    }
     if (arg === "-h" || arg === "--help") {
       result.wantsHelp = true;
       i++;
@@ -1023,12 +1085,16 @@ async function main() {
     setWorktreeOverride(args.instance);
     setRepoRootOverride(`${sourceRepoRoot()}/.worktrees/${args.instance}`);
   }
+  const parentConvId = process.env.EXOCORTEX_PARENT_CONV_ID?.trim() || null;
+  const autoDetachSend = Boolean(parentConvId) && !args.foreground && args.conv !== parentConvId;
   const opts = {
     json: args.json,
     full: args.full,
     stream: args.stream,
     idOnly: args.idOnly,
-    timeout: args.timeout
+    timeout: args.timeout,
+    detached: args.detach || autoDetachSend,
+    notifyParent: args.noNotify ? null : args.notifyParent ?? parentConvId
   };
   const conn = new Connection;
   try {

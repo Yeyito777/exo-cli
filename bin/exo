@@ -4,70 +4,26 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BUN="$HOME/.local/bun/bin/bun"
 
-usage() {
-    cat <<'EOF'
-usage: exo <command> [args]
-
-Send messages:
-  exo send "message"                               New conversation
-  exo send "message" -c <id>                       Continue a conversation
-  exo send "message" --opus                        Claude Opus shortcut
-  exo send "message" --model anthropic/opus-4.6    Explicit model
-  cat file | exo send -                             Read from stdin
-
-commands:
-  send         Send a message
-  list         List conversations
-  info         Conversation metadata
-  history      Conversation history
-  delete       Delete a conversation
-  abort        Abort an in-flight stream
-  queue        Queue a message for delivery
-  rename       Rename a conversation
-  llm          One-shot LLM (no conversation)
-  status       Check daemon health
-  help         Show this help
-
-aliases:
-  ls -> list        rm -> delete        mv -> rename
-
-flags:
-  --opus, --sonnet, --haiku         Claude model shortcuts
-  --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 | openai/gpt-5.5
-  --provider <id>                   Provider: anthropic | openai
-  -c, --conv <id>                   Conversation ID
-  --json                            Structured JSON output
-  --full                            Include thinking + tool results
-  --stream                          Stream events as NDJSON
-  --id                              Print only conversation ID
-  --timeout <sec>                   Max wait time (default 300)
-  --system <prompt>                 System prompt (for llm)
-
-subagent timeouts:
-  Subagent conversations (usually via exo send) can take a long time.
-  Pass --timeout appropriate to the task complexity:
-    Simple lookups/questions:         --timeout 300   (5 min)
-    Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
-    Complex multi-step work:          --timeout 3600  (1 hour)
-
-Run 'exo <command> --help' for command-specific usage.
-EOF
+find_bun() {
+  if command -v bun >/dev/null 2>&1; then
+    command -v bun
+    return 0
+  fi
+  if [[ -x "$HOME/.bun/bin/bun" ]]; then
+    printf '%s\n' "$HOME/.bun/bin/bun"
+    return 0
+  fi
+  if [[ -x "$HOME/.local/bun/bin/bun" ]]; then
+    printf '%s\n' "$HOME/.local/bun/bin/bun"
+    return 0
+  fi
+  return 1
 }
 
-if [[ $# -eq 0 ]]; then
-    usage
-    exit 1
-fi
+BUN="$(find_bun)" || {
+  printf '  ✗ bun is required but not found. Install: curl -fsSL https://bun.sh/install | bash\n' >&2
+  exit 1
+}
 
-case "$1" in
-    help|--help|-h)
-        # If 'exo help <topic>', delegate to bun for per-command help.
-        if [[ "$1" == "help" && $# -gt 1 ]]; then
-            exec "$BUN" run "$PROJECT_DIR/src/main.ts" "$@"
-        fi
-        usage ;;
-    *)
-        exec "$BUN" run "$PROJECT_DIR/src/main.ts" "$@" ;;
-esac
+exec "$BUN" run "$PROJECT_DIR/src/main.ts" "$@"

@@ -57,13 +57,16 @@ ${MODEL_FLAG_SUMMARY}
   --id                              Print only conversation ID
   --timeout <sec>                   Max wait time (default 300)
   --system <prompt>                 System prompt (for llm)
+  --detach, --background            Start exo send and return immediately
+  --foreground                      Disable parent-agent auto-detach for send
+  --notify-parent <id>              Notify a parent conversation on send completion
+  --no-notify                       Detach send without parent notification
 
-${b("SUBAGENT TIMEOUTS")}
-  Subagent conversations (usually via exo send) can take a long time.
-  Pass --timeout appropriate to the task complexity:
-    Simple lookups/questions:         --timeout 300   (5 min)
-    Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
-    Complex multi-step work:          --timeout 3600  (1 hour)
+${b("SUBAGENTS")}
+  \`exo send\` starts or continues persisted conversation subagents. From inside
+  an Exocortex parent conversation it auto-detaches and notifies the parent
+  when done. \`--timeout\` controls how long this CLI waits; detached children
+  continue in the daemon until they finish or are aborted.
 
 Run ${b("exo <command> --help")} for command-specific usage.
 `);
@@ -91,13 +94,19 @@ ${MODEL_FLAG_SUMMARY_SEND}
   --stream                          Stream events as NDJSON as they arrive
   --id                              Print only the conversation ID
   --timeout <sec>                   Max wait time (default 300)
+  --detach, --background            Start the turn and return immediately
+  --foreground                      Disable parent-agent auto-detach
+  --notify-parent <id>              Notify a parent conversation on completion
+  --no-notify                       Detach without parent notification
 
-${b("SUBAGENT TIMEOUTS")}
-  Subagent conversations can take a long time. Pass --timeout appropriate
-  to the task complexity:
-    Simple lookups/questions:         --timeout 300   (5 min)
-    Moderate coding/research:         --timeout 600   to --timeout 1800 (10-30 min)
-    Complex multi-step work:          --timeout 3600  (1 hour)
+${b("SUBAGENT BEHAVIOR")}
+  When exo send is called from inside an Exocortex parent conversation, it
+  automatically runs detached and the daemon notifies the parent when done.
+
+${b("SUBAGENT RUNTIME")}
+  Detached sends return after the daemon accepts the turn. Use \`exo abort <id>\`
+  to stop a detached child conversation if needed. In foreground mode,
+  --timeout controls how long this CLI waits for the response.
 
 ${b("OUTPUT")}
   Default: response text + tool call summaries, then "exo:<convId>" on the last line.

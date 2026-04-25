@@ -28,6 +28,10 @@
  *   --id                            Print only conversation ID
  *   --timeout <sec>                 Max wait time (default 300)
  *   --system <prompt>               System prompt (for llm command)
+ *   --detach, --background          Start exo send and return immediately
+ *   --foreground                    Disable parent-agent auto-detach for send
+ *   --notify-parent <id>            Notify a parent conversation on send completion
+ *   --no-notify                     Detach send without parent notification
  */
 
 import { Connection } from "./conn";
@@ -63,6 +67,10 @@ interface ParsedArgs {
   timeout: number;
   wantsHelp: boolean;
   endTiming: boolean;
+  detach: boolean;
+  foreground: boolean;
+  notifyParent: string | null;
+  noNotify: boolean;
   parseError: string | null;
 }
 
@@ -82,6 +90,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     timeout: 300_000,
     wantsHelp: false,
     endTiming: false,
+    detach: false,
+    foreground: false,
+    notifyParent: null,
+    noNotify: false,
     parseError: null,
   };
 
@@ -157,6 +169,18 @@ function parseArgs(argv: string[]): ParsedArgs {
       result.timeout = parseInt(argv[++i], 10) * 1000; i++; continue;
     }
     if (arg === "--end") { result.endTiming = true; i++; continue; }
+    if (arg === "--detach" || arg === "--background") { result.detach = true; i++; continue; }
+    if (arg === "--foreground") { result.foreground = true; i++; continue; }
+    if (arg === "--no-notify") { result.noNotify = true; i++; continue; }
+    if (arg === "--notify-parent") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--notify-parent requires a conversation ID";
+        return result;
+      }
+      result.notifyParent = argv[++i];
+      i++;
+      continue;
+    }
     if (arg === "-h" || arg === "--help") {
       result.wantsHelp = true; i++; continue;
     }
@@ -240,12 +264,17 @@ async function main(): Promise<number> {
     setRepoRootOverride(`${sourceRepoRoot()}/.worktrees/${args.instance}`);
   }
 
+  const parentConvId = process.env.EXOCORTEX_PARENT_CONV_ID?.trim() || null;
+  const autoDetachSend = Boolean(parentConvId) && !args.foreground && args.conv !== parentConvId;
+
   const opts: OutputOptions = {
     json: args.json,
     full: args.full,
     stream: args.stream,
     idOnly: args.idOnly,
     timeout: args.timeout,
+    detached: args.detach || autoDetachSend,
+    notifyParent: args.noNotify ? null : (args.notifyParent ?? parentConvId),
   };
 
   const conn = new Connection();
