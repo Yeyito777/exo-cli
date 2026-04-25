@@ -5,5 +5,24 @@
   "display": {
     "label": "Exocortex",
     "color": "#1d9bf0"
+  },
+  "shell": {
+    "literalArgs": [
+      {
+        "subcommand": "send",
+        "kind": "positional",
+        "index": 0,
+        "flagsWithValues": ["-c", "--conv", "--provider", "--model", "--instance", "--timeout", "--notify-parent", "--system"]
+      },
+      {
+        "subcommand": "llm",
+        "kind": "positional",
+        "index": 0,
+        "flagsWithValues": ["-c", "--conv", "--provider", "--model", "--instance", "--timeout", "--notify-parent", "--system"]
+      },
+      { "subcommand": "llm", "kind": "flag", "flag": "--system" },
+      { "subcommand": "queue", "kind": "positional", "index": 1, "flagsWithValues": ["-c", "--conv", "--provider", "--model", "--instance", "--timeout", "--notify-parent", "--system"] },
+      { "subcommand": "rename", "kind": "positional", "index": 1, "flagsWithValues": ["-c", "--conv", "--provider", "--model", "--instance", "--timeout", "--notify-parent", "--system"] }
+    ]
   }
 }
