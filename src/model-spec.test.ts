@@ -10,6 +10,7 @@ describe("model-spec", () => {
   test("recognizes valid providers", () => {
     expect(isProviderId("anthropic")).toBe(true);
     expect(isProviderId("openai")).toBe(true);
+    expect(isProviderId("deepseek")).toBe(true);
     expect(isProviderId("nope")).toBe(false);
   });
 
@@ -23,9 +24,16 @@ describe("model-spec", () => {
     expect(normalizeModelForProvider("openai", "gpt-5.4-mini")).toBe("gpt-5.4-mini");
   });
 
-  test("infers anthropic from canonical and shorthand models", () => {
+  test("normalizes deepseek aliases", () => {
+    expect(normalizeModelForProvider("deepseek", "pro")).toBe("deepseek-v4-pro");
+    expect(normalizeModelForProvider("deepseek", "v4-flash")).toBe("deepseek-v4-flash");
+  });
+
+  test("infers providers from canonical and shorthand models", () => {
     expect(inferProviderForModel("claude-opus-4-6")).toBe("anthropic");
     expect(inferProviderForModel("opus")).toBe("anthropic");
+    expect(inferProviderForModel("deepseek-v4-pro")).toBe("deepseek");
+    expect(inferProviderForModel("pro")).toBe("deepseek");
     expect(inferProviderForModel("gpt-5.4")).toBeUndefined();
   });
 
@@ -37,6 +45,10 @@ describe("model-spec", () => {
     expect(parseModelSpecifier("openai/gpt-5.4-mini")).toEqual({
       provider: "openai",
       model: "gpt-5.4-mini",
+    });
+    expect(parseModelSpecifier("deepseek/pro")).toEqual({
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
     });
   });
 

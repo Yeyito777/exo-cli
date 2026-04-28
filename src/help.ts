@@ -11,13 +11,15 @@ const INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target a spec
 
 const MODEL_FLAG_SUMMARY = `  --opus, --sonnet, --haiku         Claude model shortcuts
   --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
-                                    claude-opus-4-6 | openai/gpt-5.5
-  --provider <id>                   Provider: anthropic | openai`;
+                                    claude-opus-4-6 | openai/gpt-5.5 |
+                                    deepseek/deepseek-v4-pro
+  --provider <id>                   Provider: anthropic | openai | deepseek`;
 
 const MODEL_FLAG_SUMMARY_SEND = `  --opus, --sonnet, --haiku         Claude model shortcuts
   --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
-                                    claude-opus-4-6 | openai/gpt-5.5
-  --provider <id>                   Provider: anthropic | openai`;
+                                    claude-opus-4-6 | openai/gpt-5.5 |
+                                    deepseek/deepseek-v4-pro
+  --provider <id>                   Provider: anthropic | openai | deepseek`;
 
 export function printHelp(): void {
   process.stdout.write(`${b("exo")} — Exocortex CLI client
@@ -28,6 +30,7 @@ ${b("USAGE")}
   exo send "message" --opus                        Claude Opus shortcut
   exo send "message" --model anthropic/opus-4.6    Explicit model
   exo send "message" --provider openai --model gpt-5.4-mini
+  exo send "message" --model deepseek/deepseek-v4-pro
   exo status --instance browse-links                Talk to a worktree daemon
   cat file | exo send -                             Read message from stdin
 

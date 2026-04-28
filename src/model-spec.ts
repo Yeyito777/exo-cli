@@ -17,14 +17,25 @@ const ANTHROPIC_ALIASES: Record<string, ModelId> = {
   "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
 };
 
+const DEEPSEEK_ALIASES: Record<string, ModelId> = {
+  pro: "deepseek-v4-pro",
+  "v4-pro": "deepseek-v4-pro",
+  "deepseek-v4-pro": "deepseek-v4-pro",
+  flash: "deepseek-v4-flash",
+  "v4-flash": "deepseek-v4-flash",
+  "deepseek-v4-flash": "deepseek-v4-flash",
+};
+
 export function isProviderId(value: string): value is ProviderId {
-  return value === "anthropic" || value === "openai";
+  return value === "anthropic" || value === "openai" || value === "deepseek";
 }
 
 export function inferProviderForModel(model: ModelId | null): ProviderId | undefined {
   if (!model) return undefined;
   const lowered = model.trim().toLowerCase();
-  return lowered in ANTHROPIC_ALIASES ? "anthropic" : undefined;
+  if (lowered in ANTHROPIC_ALIASES) return "anthropic";
+  if (lowered in DEEPSEEK_ALIASES || lowered.startsWith("deepseek-")) return "deepseek";
+  return undefined;
 }
 
 export function normalizeModelForProvider(provider: ProviderId | null, model: string): ModelId {
@@ -33,6 +44,10 @@ export function normalizeModelForProvider(provider: ProviderId | null, model: st
   if (provider === "anthropic" || provider === null) {
     const anthropic = ANTHROPIC_ALIASES[lowered];
     if (anthropic) return anthropic;
+  }
+  if (provider === "deepseek" || provider === null) {
+    const deepseek = DEEPSEEK_ALIASES[lowered];
+    if (deepseek) return deepseek;
   }
   return trimmed;
 }
@@ -62,6 +77,11 @@ export function parseModelSpecifier(spec: string): ModelSelection {
   const anthropic = ANTHROPIC_ALIASES[trimmed.toLowerCase()];
   if (anthropic) {
     return { provider: "anthropic", model: anthropic };
+  }
+
+  const deepseek = DEEPSEEK_ALIASES[trimmed.toLowerCase()];
+  if (deepseek) {
+    return { provider: "deepseek", model: deepseek };
   }
 
   return { provider: null, model: trimmed };

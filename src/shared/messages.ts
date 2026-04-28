@@ -11,7 +11,7 @@
 
 // ── Providers / Models ──────────────────────────────────────────────
 
-export type ProviderId = "anthropic" | "openai";
+export type ProviderId = "anthropic" | "openai" | "deepseek";
 
 /** Provider-scoped model identifier. */
 export type ModelId = string;
@@ -36,6 +36,8 @@ export const MAX_CONTEXT: Record<string, number> = {
   "gpt-5.4": 272_000,
   "gpt-5.4-mini": 272_000,
   "gpt-5.3-codex-spark": 128_000,
+  "deepseek-v4-pro": 1_000_000,
+  "deepseek-v4-flash": 1_000_000,
 };
 
 // ── Image attachments ──────────────────────────────────────────────
