@@ -266,6 +266,7 @@ async function main(): Promise<number> {
 
   const parentConvId = process.env.EXOCORTEX_PARENT_CONV_ID?.trim() || null;
   const autoDetachSend = Boolean(parentConvId) && !args.foreground && args.conv !== parentConvId;
+  const spawnedByAgent = Boolean(parentConvId) || Boolean(args.notifyParent);
 
   const opts: OutputOptions = {
     json: args.json,
@@ -275,6 +276,7 @@ async function main(): Promise<number> {
     timeout: args.timeout,
     detached: args.detach || autoDetachSend,
     notifyParent: args.noNotify ? null : (args.notifyParent ?? parentConvId),
+    subagentFolder: spawnedByAgent,
   };
 
   const conn = new Connection();

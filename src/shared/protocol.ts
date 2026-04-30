@@ -26,6 +26,10 @@ export interface NewConversationCommand {
   effort?: EffortLevel;
   /** Initial title. Clients that don't set this get an empty title. */
   title?: string;
+  /** Folder to create the conversation in. Null/omitted means the sidebar root. */
+  folderId?: string | null;
+  /** If true, the daemon creates/reuses the top-level "subagents" folder for this conversation. */
+  subagent?: boolean;
 }
 
 export interface ParentNotificationTarget {

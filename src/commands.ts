@@ -13,9 +13,9 @@ import type {
   ConversationCreatedEvent,
   ConversationsListEvent,
   ConversationLoadedEvent,
+  AckEvent,
   ConversationDeletedEvent,
   ConversationUpdatedEvent,
-  AckEvent,
   LlmCompleteResultEvent,
 } from "./shared/protocol";
 import { inferProviderForModel } from "./model-spec";
@@ -30,6 +30,7 @@ export interface OutputOptions {
   timeout: number;
   detached?: boolean;
   notifyParent?: string | null;
+  subagentFolder?: boolean;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -133,7 +134,14 @@ export async function send(
     const reqId = nextReqId();
     const title = autoTitle(text);
     const created = await conn.request<ConversationCreatedEvent>(
-      { type: "new_conversation", reqId, provider: resolvedProvider ?? undefined, model: model ?? undefined, title },
+      {
+        type: "new_conversation",
+        reqId,
+        provider: resolvedProvider ?? undefined,
+        model: model ?? undefined,
+        title,
+        subagent: opts.subagentFolder === true,
+      },
       (e): e is ConversationCreatedEvent => e.type === "conversation_created" && e.reqId === reqId,
     );
     convId = created.convId;
