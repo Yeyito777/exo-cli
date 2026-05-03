@@ -31,6 +31,7 @@ ${b("USAGE")}
   exo send "message" --model anthropic/opus-4.6    Explicit model
   exo send "message" --provider openai --model gpt-5.4-mini
   exo send "message" --model deepseek/deepseek-v4-pro
+  exo transcribe call-segment.wav --mime-type audio/wav
   exo status --instance browse-links                Talk to a worktree daemon
   cat file | exo send -                             Read message from stdin
 
@@ -44,6 +45,7 @@ ${b("COMMANDS")}
   queue <id> "msg" [--end]          Queue message for delivery
   rename <id> <title>               Rename a conversation
   llm "text" --system "..."         One-shot LLM (no conversation)
+  transcribe <audio-file>           Transcribe audio through exocortexd
   status                            Check if daemon is running
   help [command]                    Show help
 
@@ -60,6 +62,7 @@ ${MODEL_FLAG_SUMMARY}
   --id                              Print only conversation ID
   --timeout <sec>                   Max wait time (default 300)
   --system <prompt>                 System prompt (for llm)
+  --mime-type <type>                Audio MIME type (for transcribe)
   --detach, --background            Start exo send and return immediately
   --foreground                      Disable parent-agent auto-detach for send
   --notify-parent <id>              Notify a parent conversation on send completion
@@ -220,6 +223,26 @@ ${b("USAGE")}
 
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
+`,
+
+  transcribe: `${b("exo transcribe")} <audio-file> [flags]
+
+Transcribe a local audio file through exocortexd. The daemon owns OpenAI OAuth,
+so this works from detached/background processes without exposing tokens.
+
+${b("USAGE")}
+  exo transcribe segment.wav
+  exo transcribe segment.wav --mime-type audio/wav
+  exo transcribe call.webm --mime-type audio/webm --json
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
+  --mime-type <type>                Audio MIME type (default inferred from extension)
+  --json                            Output as JSON object
+  --timeout <sec>                   Max wait time (default 300)
+
+${b("OUTPUT")}
+  Default: transcript text.
 `,
 
   status: `${b("exo status")} [flags]

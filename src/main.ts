@@ -15,6 +15,7 @@
  *   exo abort <id>                  Abort in-flight stream
  *   exo rename <id> <title>         Rename a conversation
  *   exo llm "text" --system "..."   One-shot LLM completion
+ *   exo transcribe file.wav          Transcribe audio through the daemon
  *   exo status                      Check daemon health
  *
  * Flags:
@@ -35,7 +36,7 @@
  */
 
 import { Connection } from "./conn";
-import { send, list, info, history, deleteConversation, abort, queue, rename, llm, status, type OutputOptions } from "./commands";
+import { send, list, info, history, deleteConversation, abort, queue, rename, llm, transcribeAudio, status, type OutputOptions } from "./commands";
 import { printHelp, printCommandHelp, hasCommandHelp } from "./help";
 import { inferProviderForModel, isProviderId, normalizeModelForProvider, parseModelSpecifier } from "./model-spec";
 import { setRepoRootOverride, setWorktreeOverride, sourceRepoRoot, worktreeName } from "./shared/paths";
@@ -43,7 +44,7 @@ import type { ModelId, ProviderId } from "./shared/protocol";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
-const SUBCOMMANDS = new Set(["send", "list", "info", "history", "delete", "abort", "queue", "rename", "llm", "status", "help"]);
+const SUBCOMMANDS = new Set(["send", "list", "info", "history", "delete", "abort", "queue", "rename", "llm", "transcribe", "status", "help"]);
 
 // Small Unix-style aliases only. Canonical commands are listed above.
 const ALIASES: Record<string, string> = {
@@ -59,6 +60,7 @@ interface ParsedArgs {
   provider: ProviderId | null;
   model: ModelId | null;
   system: string;
+  mimeType: string | null;
   instance: string | null;
   json: boolean;
   full: boolean;
@@ -82,6 +84,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     provider: null,
     model: null,
     system: "You are a helpful assistant.",
+    mimeType: null,
     instance: null,
     json: false,
     full: false,
@@ -164,6 +167,9 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
     if (arg === "--system" && i + 1 < argv.length) {
       result.system = argv[++i]; i++; continue;
+    }
+    if (arg === "--mime-type" && i + 1 < argv.length) {
+      result.mimeType = argv[++i]; i++; continue;
     }
     if (arg === "--timeout" && i + 1 < argv.length) {
       result.timeout = parseInt(argv[++i], 10) * 1000; i++; continue;
@@ -340,6 +346,12 @@ async function main(): Promise<number> {
           : args.positionals.join(" ");
         if (!text) { process.stderr.write("Usage: exo llm \"text\" --system \"prompt\"\nRun 'exo llm --help' for details.\n"); return 1; }
         return await llm(conn, text, args.system, args.provider, args.model, opts);
+      }
+
+      case "transcribe": {
+        const path = args.positionals[0];
+        if (!path) { process.stderr.write("Usage: exo transcribe <audio-file> [--mime-type audio/wav]\nRun 'exo transcribe --help' for details.\n"); return 1; }
+        return await transcribeAudio(conn, path, args.mimeType, opts);
       }
 
       case "queue": {

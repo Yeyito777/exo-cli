@@ -3,6 +3,8 @@
  * and options, does its work, and returns an exit code.
  */
 
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
 import type { Connection } from "./conn";
 import type {
   ProviderId,
@@ -17,6 +19,7 @@ import type {
   ConversationDeletedEvent,
   ConversationUpdatedEvent,
   LlmCompleteResultEvent,
+  TranscriptionResultEvent,
 } from "./shared/protocol";
 import { inferProviderForModel } from "./model-spec";
 import { collectResponse, type StreamCallback } from "./collect";
@@ -382,6 +385,46 @@ export async function rename(conn: Connection, convId: string, title: string): P
     (e): e is ConversationUpdatedEvent => e.type === "conversation_updated" && e.summary.id === convId,
   );
   process.stdout.write(`Renamed ${convId}\n`);
+  return 0;
+}
+
+// ── transcribe ──────────────────────────────────────────────────────
+
+function inferAudioMimeType(path: string): string {
+  switch (extname(path).toLowerCase()) {
+    case ".wav": return "audio/wav";
+    case ".mp3": return "audio/mpeg";
+    case ".m4a": return "audio/mp4";
+    case ".mp4": return "audio/mp4";
+    case ".ogg": return "audio/ogg";
+    case ".opus": return "audio/ogg; codecs=opus";
+    case ".webm": return "audio/webm";
+    case ".flac": return "audio/flac";
+    default: return "audio/wav";
+  }
+}
+
+export async function transcribeAudio(conn: Connection, path: string, mimeType: string | null, opts: OutputOptions): Promise<number> {
+  const reqId = nextReqId();
+  const audioBytes = await readFile(path);
+  const resolvedMimeType = mimeType ?? inferAudioMimeType(path);
+  const event = await conn.request<TranscriptionResultEvent>(
+    {
+      type: "transcribe_audio",
+      reqId,
+      audioBase64: audioBytes.toString("base64"),
+      mimeType: resolvedMimeType,
+    },
+    (e): e is TranscriptionResultEvent => e.type === "transcription_result" && e.reqId === reqId,
+    opts.timeout,
+  );
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ text: event.text, mimeType: resolvedMimeType }) + "\n");
+  } else {
+    process.stdout.write(event.text + "\n");
+  }
+
   return 0;
 }
 

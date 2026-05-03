@@ -185,6 +185,15 @@ export interface GetSystemPromptCommand {
   reqId?: string;
 }
 
+export interface TranscribeAudioCommand {
+  type: "transcribe_audio";
+  reqId?: string;
+  /** Base64-encoded audio payload, usually WAV. */
+  audioBase64: string;
+  /** MIME type for the uploaded audio. */
+  mimeType: string;
+}
+
 export interface LoginCommand {
   type: "login";
   reqId?: string;
@@ -218,6 +227,7 @@ export type Command =
   | UnwindConversationCommand
   | LlmCompleteCommand
   | GetSystemPromptCommand
+  | TranscribeAudioCommand
   | LoginCommand
   | LogoutCommand;
 
@@ -439,6 +449,12 @@ export interface SystemPromptEvent {
   systemPrompt: string;
 }
 
+export interface TranscriptionResultEvent {
+  type: "transcription_result";
+  reqId?: string;
+  text: string;
+}
+
 export interface AuthStatusEvent {
   type: "auth_status";
   reqId?: string;
@@ -484,5 +500,6 @@ export type Event =
   | HistoryUpdatedEvent
   | LlmCompleteResultEvent
   | SystemPromptEvent
+  | TranscriptionResultEvent
   | AuthStatusEvent
   | ErrorEvent;
