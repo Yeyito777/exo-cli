@@ -20,6 +20,9 @@ import type {
   ConversationUpdatedEvent,
   LlmCompleteResultEvent,
   TranscriptionResultEvent,
+  ConversationSummary,
+  FolderSummary,
+  SidebarItemRef,
 } from "./shared/protocol";
 import { inferProviderForModel } from "./model-spec";
 import { collectResponse, type StreamCallback } from "./collect";
@@ -53,6 +56,142 @@ function autoTitle(text: string): string {
   // CLI-originated conversations are easy to distinguish from human ones.
   const firstLine = text.split("\n")[0].trim();
   return "cli: " + truncate(firstLine, 75);
+}
+
+async function fetchSidebarState(conn: Connection): Promise<{ conversations: ConversationSummary[]; folders: FolderSummary[] }> {
+  const reqId = nextReqId();
+  const event = await conn.request<ConversationsListEvent>(
+    { type: "list_conversations", reqId },
+    (e): e is ConversationsListEvent => e.type === "conversations_list" && e.reqId === reqId,
+  );
+  return { conversations: event.conversations, folders: event.folders ?? [] };
+}
+
+interface SidebarStateSnapshot {
+  conversations: ConversationSummary[];
+  folders: FolderSummary[];
+}
+
+type FolderPathResolution =
+  | { kind: "root"; folderId: null; path: "/" }
+  | { kind: "folder"; folder: FolderSummary; folderId: string; path: string };
+
+function normalizeFolderPath(input: string | null | undefined): string {
+  const trimmed = (input ?? "/").trim();
+  if (!trimmed || trimmed === "/") return "/";
+  return trimmed.replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+function folderPath(folders: FolderSummary[], folderId: string | null | undefined): string {
+  if (!folderId) return "/";
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let folder = folders.find((f) => f.id === folderId);
+  while (folder && !seen.has(folder.id)) {
+    seen.add(folder.id);
+    names.unshift(folder.name);
+    folder = folder.parentId ? folders.find((f) => f.id === folder?.parentId) : undefined;
+  }
+  return names.length ? names.join("/") : "/";
+}
+
+function resolveFolderPath(state: SidebarStateSnapshot, input: string | null | undefined): FolderPathResolution | null {
+  const normalized = normalizeFolderPath(input);
+  if (normalized === "/") return { kind: "root", folderId: null, path: "/" };
+  const byPath = state.folders.find((f) => folderPath(state.folders, f.id).toLowerCase() === normalized.toLowerCase());
+  if (byPath) return { kind: "folder", folder: byPath, folderId: byPath.id, path: folderPath(state.folders, byPath.id) };
+  return null;
+}
+
+function directChildFolders(state: SidebarStateSnapshot, parentId: string | null): FolderSummary[] {
+  return state.folders
+    .filter((folder) => (folder.parentId ?? null) === parentId)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+}
+
+function directChildConversations(state: SidebarStateSnapshot, parentId: string | null): ConversationSummary[] {
+  return state.conversations
+    .filter((conversation) => (conversation.folderId ?? null) === parentId)
+    .sort((a, b) => a.sortOrder - b.sortOrder || (a.title || "").localeCompare(b.title || ""));
+}
+
+function childItemCount(state: SidebarStateSnapshot, parentId: string | null): number {
+  return directChildFolders(state, parentId).length + directChildConversations(state, parentId).length;
+}
+
+function jobStatus(c: ConversationSummary): "running" | "done" | null {
+  if (c.streaming) return "running";
+  if (c.unread) return "done";
+  return null;
+}
+
+function conversationStatusLabel(c: ConversationSummary): string {
+  return jobStatus(c) ?? "idle";
+}
+
+function sidebarItemParent(state: SidebarStateSnapshot, item: SidebarItemRef): string | null | undefined {
+  if (item.type === "conversation") return state.conversations.find((c) => c.id === item.id)?.folderId ?? null;
+  return state.folders.find((f) => f.id === item.id)?.parentId ?? null;
+}
+
+function descendantsOfFolder(state: SidebarStateSnapshot, folderId: string): Set<string> {
+  const ids = new Set<string>([folderId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of state.folders) {
+      if (folder.parentId && ids.has(folder.parentId) && !ids.has(folder.id)) {
+        ids.add(folder.id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
+}
+
+function resolveSidebarItem(state: SidebarStateSnapshot, input: string): SidebarItemRef {
+  const conversation = state.conversations.find((c) => c.id === input);
+  if (conversation) return { type: "conversation", id: conversation.id };
+  const folder = resolveFolderPath(state, input);
+  if (folder?.kind === "folder") return { type: "folder", id: folder.folderId };
+  throw new Error(`No conversation ID or folder path found for ${JSON.stringify(input)}`);
+}
+
+function resolveMoveDestination(state: SidebarStateSnapshot, items: SidebarItemRef[], input: string): FolderPathResolution {
+  const raw = input.trim();
+  if (raw === "..") {
+    const parents = new Set(items.map((item) => sidebarItemParent(state, item)));
+    if (parents.has(undefined)) throw new Error("Cannot resolve parent for one or more source items");
+    if (parents.size !== 1) throw new Error("'..' requires all source items to currently be in the same folder");
+    const currentParent = [...parents][0] ?? null;
+    if (!currentParent) return { kind: "root", folderId: null, path: "/" };
+    const folder = state.folders.find((f) => f.id === currentParent);
+    if (!folder?.parentId) return { kind: "root", folderId: null, path: "/" };
+    const parent = state.folders.find((f) => f.id === folder.parentId);
+    if (!parent) return { kind: "root", folderId: null, path: "/" };
+    return { kind: "folder", folder: parent, folderId: parent.id, path: folderPath(state.folders, parent.id) };
+  }
+
+  const destination = resolveFolderPath(state, raw);
+  if (!destination) throw new Error(`Folder not found: ${input}`);
+  for (const item of items) {
+    if (item.type === "folder" && destination.folderId && descendantsOfFolder(state, item.id).has(destination.folderId)) {
+      throw new Error("Cannot move a folder into itself or one of its descendants");
+    }
+  }
+  return destination;
+}
+
+function flattenFolderTree(state: SidebarStateSnapshot, parentId: string | null, depth = 0): Array<{ depth: number; type: "folder" | "conversation"; id: string; name: string; path: string; status?: string; children?: number }> {
+  const rows: Array<{ depth: number; type: "folder" | "conversation"; id: string; name: string; path: string; status?: string; children?: number }> = [];
+  for (const folder of directChildFolders(state, parentId)) {
+    rows.push({ depth, type: "folder", id: folder.id, name: folder.name, path: folderPath(state.folders, folder.id), children: childItemCount(state, folder.id) });
+    rows.push(...flattenFolderTree(state, folder.id, depth + 1));
+  }
+  for (const conversation of directChildConversations(state, parentId)) {
+    rows.push({ depth, type: "conversation", id: conversation.id, name: conversation.title || "(untitled)", path: folderPath(state.folders, conversation.folderId ?? null), status: conversationStatusLabel(conversation) });
+  }
+  return rows;
 }
 
 // ── send ────────────────────────────────────────────────────────────
@@ -240,11 +379,7 @@ export async function send(
 // ── list ────────────────────────────────────────────────────────────
 
 export async function list(conn: Connection, opts: OutputOptions): Promise<number> {
-  const reqId = nextReqId();
-  const event = await conn.request<ConversationsListEvent>(
-    { type: "list_conversations", reqId },
-    (e): e is ConversationsListEvent => e.type === "conversations_list" && e.reqId === reqId,
-  );
+  const event = await fetchSidebarState(conn);
 
   if (opts.json) {
     process.stdout.write(JSON.stringify(event.conversations) + "\n");
@@ -264,6 +399,228 @@ export async function list(conn: Connection, opts: OutputOptions): Promise<numbe
     }
   }
 
+  return 0;
+}
+
+// ── jobs ─────────────────────────────────────────────────────────────
+
+export async function jobs(conn: Connection, opts: OutputOptions): Promise<number> {
+  const { conversations } = await fetchSidebarState(conn);
+  const activeJobs = conversations
+    .map((conversation) => ({ conversation, status: jobStatus(conversation) }))
+    .filter((entry): entry is { conversation: ConversationSummary; status: "running" | "done" } => entry.status !== null);
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(activeJobs.map(({ conversation, status }) => ({
+      id: conversation.id,
+      title: conversation.title || "",
+      status,
+      running: status === "running",
+      done: status === "done",
+      streaming: conversation.streaming,
+      completed: conversation.unread && !conversation.streaming,
+    }))) + "\n");
+    return 0;
+  }
+
+  if (activeJobs.length === 0) {
+    process.stdout.write("No jobs.\n");
+    return 0;
+  }
+
+  for (const { conversation, status } of activeJobs) {
+    process.stdout.write(`${conversation.id}  ${status}  ${conversation.title || "(untitled)"}\n`);
+  }
+  return 0;
+}
+
+// ── folder management ────────────────────────────────────────────
+
+export async function folderList(conn: Connection, path: string | null, opts: OutputOptions): Promise<number> {
+  const state = await fetchSidebarState(conn);
+  const target = resolveFolderPath(state, path);
+  if (!target) throw new Error(`Folder not found: ${path ?? "/"}`);
+  const folders = directChildFolders(state, target.folderId);
+  const conversations = directChildConversations(state, target.folderId);
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({
+      path: target.path,
+      folderId: target.folderId,
+      folders: folders.map((folder) => ({ id: folder.id, name: folder.name, path: folderPath(state.folders, folder.id), children: childItemCount(state, folder.id) })),
+      conversations: conversations.map((conversation) => ({
+        id: conversation.id,
+        title: conversation.title || "",
+        status: conversationStatusLabel(conversation),
+        streaming: conversation.streaming,
+        completed: conversation.unread && !conversation.streaming,
+      })),
+    }) + "\n");
+    return 0;
+  }
+
+  process.stdout.write(`${target.path}\n`);
+  if (folders.length === 0 && conversations.length === 0) {
+    process.stdout.write("  (empty)\n");
+    return 0;
+  }
+  for (const folder of folders) {
+    process.stdout.write(`  ${folder.name}/\n`);
+  }
+  for (const conversation of conversations) {
+    process.stdout.write(`  ${conversation.id}  ${conversationStatusLabel(conversation)}  ${conversation.title || "(untitled)"}\n`);
+  }
+  return 0;
+}
+
+export async function folderTree(conn: Connection, path: string | null, opts: OutputOptions): Promise<number> {
+  const state = await fetchSidebarState(conn);
+  const target = resolveFolderPath(state, path);
+  if (!target) throw new Error(`Folder not found: ${path ?? "/"}`);
+  const rows = flattenFolderTree(state, target.folderId);
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ path: target.path, folderId: target.folderId, entries: rows }) + "\n");
+    return 0;
+  }
+
+  process.stdout.write(`${target.path}\n`);
+  if (rows.length === 0) {
+    process.stdout.write("  (empty)\n");
+    return 0;
+  }
+  for (const row of rows) {
+    const indent = "  ".repeat(row.depth + 1);
+    if (row.type === "folder") {
+      process.stdout.write(`${indent}${row.name}/\n`);
+    } else {
+      process.stdout.write(`${indent}${row.id}  ${row.status}  ${row.name}\n`);
+    }
+  }
+  return 0;
+}
+
+async function createFolderAndRefresh(conn: Connection, name: string, parentId: string | null): Promise<SidebarStateSnapshot> {
+  const reqId = nextReqId();
+  await conn.request<AckEvent>(
+    { type: "create_folder", reqId, name, parentId, items: [] },
+    (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+  );
+  return await fetchSidebarState(conn);
+}
+
+export async function folderMkdir(conn: Connection, path: string, opts: OutputOptions): Promise<number> {
+  const normalized = normalizeFolderPath(path);
+  if (normalized === "/") throw new Error("Cannot create root folder");
+  const parts = normalized.split("/").filter(Boolean);
+  let state = await fetchSidebarState(conn);
+  let parentId: string | null = null;
+  let currentPath = "";
+  const created: Array<{ name: string; path: string; parentId: string | null }> = [];
+
+  for (const part of parts) {
+    currentPath = currentPath ? `${currentPath}/${part}` : part;
+    const existing = state.folders.find((folder) => (folder.parentId ?? null) === parentId && folder.name.toLowerCase() === part.toLowerCase());
+    if (existing) {
+      parentId = existing.id;
+      continue;
+    }
+    state = await createFolderAndRefresh(conn, part, parentId);
+    const made = state.folders.find((folder) => (folder.parentId ?? null) === parentId && folder.name.toLowerCase() === part.toLowerCase());
+    if (!made) throw new Error(`Folder was created but could not be found again: ${currentPath}`);
+    created.push({ name: part, path: currentPath, parentId });
+    parentId = made.id;
+  }
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ path: normalized, created }) + "\n");
+  } else if (created.length === 0) {
+    process.stdout.write(`Folder already exists: ${normalized}\n`);
+  } else {
+    process.stdout.write(`Created ${created.map((folder) => folder.path).join(", ")}\n`);
+  }
+  return 0;
+}
+
+export async function folderMove(conn: Connection, sources: string[], destinationInput: string, opts: OutputOptions): Promise<number> {
+  const state = await fetchSidebarState(conn);
+  const items = sources.map((source) => resolveSidebarItem(state, source));
+  const seen = new Set<string>();
+  const uniqueItems = items.filter((item) => {
+    const key = `${item.type}:${item.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (uniqueItems.length === 0) throw new Error("folder mv requires at least one source");
+  const destination = resolveMoveDestination(state, uniqueItems, destinationInput);
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timeout waiting for folder move"));
+    }, opts.timeout);
+    const handler = (event: Event) => {
+      if (event.type !== "conversation_moved") return;
+      const folders = event.folders ?? state.folders;
+      const allMoved = uniqueItems.every((item) => {
+        if (item.type === "conversation") {
+          const conversation = event.conversations.find((c) => c.id === item.id);
+          return conversation && (conversation.folderId ?? null) === destination.folderId;
+        }
+        const folder = folders.find((f) => f.id === item.id);
+        return folder && (folder.parentId ?? null) === destination.folderId;
+      });
+      if (!allMoved) return;
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      conn.offEvent(handler);
+    };
+    conn.onEvent(handler);
+    conn.send({ type: "move_sidebar_items", items: uniqueItems, parentId: destination.folderId });
+  });
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ items: uniqueItems, folderId: destination.folderId, folder: destination.path }) + "\n");
+  } else {
+    process.stdout.write(`Moved ${uniqueItems.length} item(s) to ${destination.path}\n`);
+  }
+  return 0;
+}
+
+export async function folderRemove(conn: Connection, path: string, opts: OutputOptions): Promise<number> {
+  const state = await fetchSidebarState(conn);
+  const target = resolveFolderPath(state, path);
+  if (!target || target.kind !== "folder") throw new Error(`Folder not found: ${path}`);
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timeout waiting for folder removal"));
+    }, opts.timeout);
+    const handler = (event: Event) => {
+      if (event.type !== "conversation_moved") return;
+      const folders = event.folders ?? [];
+      if (folders.some((folder) => folder.id === target.folderId)) return;
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      conn.offEvent(handler);
+    };
+    conn.onEvent(handler);
+    conn.send({ type: "delete_folder", folderId: target.folderId, mode: "recursive" });
+  });
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ removed: target.path, folderId: target.folderId }) + "\n");
+  } else {
+    process.stdout.write(`Removed ${target.path}/\n`);
+  }
   return 0;
 }
 

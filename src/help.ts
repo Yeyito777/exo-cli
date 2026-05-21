@@ -28,8 +28,10 @@ ${b("USAGE")}
   cat file | exo send -                             Read message from stdin
 
 ${b("COMMANDS")}
+  ${b("Chat")}
   send "message"                    Send a message to the AI
   list                              List conversations
+  jobs                              List running/done conversation jobs
   info <id>                         Conversation metadata
   history <id>                      Conversation history
   delete <id>                       Delete a conversation
@@ -40,6 +42,13 @@ ${b("COMMANDS")}
   transcribe <audio-file>           Transcribe audio through exocortexd
   status                            Check if daemon is running
   help [command]                    Show help
+
+  ${b("Folder management")}
+  folder ls [path]                  List folder contents
+  folder tree [path]                Show a recursive folder tree
+  folder mkdir <path>               Create folder path(s)
+  folder mv <source...> <dest>      Move conversations/folders
+  folder rm <path>                  Delete a folder recursively
 
 ${b("ALIASES")}
   ls -> list        rm -> delete        mv -> rename
@@ -129,6 +138,53 @@ ${b("OUTPUT")}
   Pinned conversations show 📌, marked conversations show ★.
 `,
 
+  jobs: `${b("exo jobs")} [flags]
+
+List active conversation jobs: currently running streams and completed jobs
+that still have the TUI's done/unread indicator.
+
+${b("USAGE")}
+  exo jobs
+  exo jobs --json
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
+  --json                            Output as JSON array
+
+${b("OUTPUT")}
+  Conversation ID, status (running or done), and title.
+`,
+
+
+  folder: `${b("exo folder")} <ls|tree|mkdir|mv|rm> [...]
+
+Filesystem-like sidebar folder operations for conversations and folders.
+Paths are slash-separated folder paths. Use / for the top level. In mv,
+use .. to move items to the parent of their current common folder.
+
+${b("USAGE")}
+  exo folder ls /                         List top-level folders/conversations
+  exo folder ls record/                   List a folder
+  exo folder tree /                       Show the whole tree
+  exo folder mkdir record/clips           Create nested folders as needed
+  exo folder mv <convId> record/clips/    Move a conversation into a folder
+  exo folder mv Work/Clients /            Move a folder to the top level
+  exo folder mv <convId> ..               Move to parent of current folder
+  exo folder rm record/clips              Delete a folder recursively
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
+  --json                            Output as JSON
+  --timeout <sec>                   Max wait time for mutations (default 300)
+
+${b("SUBCOMMANDS")}
+  ls [path]                         List direct children of path
+  tree [path]                       Show recursive folder contents
+  mkdir <path>                      Create one or more folder path components
+  mv <source...> <dest>             Move conversation IDs or folder paths
+  rm <path>                         Recursively delete a folder
+`,
+
   info: `${b("exo info")} <id> [flags]
 
 Show metadata for a conversation.
@@ -175,6 +231,9 @@ ${b("USAGE")}
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
 `,
+
+
+
 
   abort: `${b("exo abort")} <id>
 

@@ -8,8 +8,8 @@
  * Commands flow client → daemon. Events flow daemon → client.
  */
 
-import type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, ToolDisplayInfo, ExternalToolStyle, ImageAttachment } from "./messages";
-export type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, ToolDisplayInfo, ExternalToolStyle, ImageAttachment };
+import type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, FolderSummary, SidebarItemRef, ToolDisplayInfo, ExternalToolStyle, ImageAttachment } from "./messages";
+export type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, FolderSummary, SidebarItemRef, ToolDisplayInfo, ExternalToolStyle, ImageAttachment };
 
 // ── Commands (client → daemon) ──────────────────────────────────────
 
@@ -138,6 +138,38 @@ export interface CloneConversationCommand {
   convId: string;
 }
 
+export interface CreateFolderCommand {
+  type: "create_folder";
+  reqId?: string;
+  name: string;
+  parentId?: string | null;
+  /** Optional items to move into the new folder, preserving the given order. */
+  items?: SidebarItemRef[];
+}
+
+export interface MoveSidebarItemsOptions {
+  /** When moving within a folder for reordering, keep the existing pinned state. */
+  preservePinned?: boolean;
+  /** Used when no insertion anchor exists, e.g. moving a visual block to the bottom. */
+  placement?: "bottom";
+}
+
+export interface MoveSidebarItemsCommand extends MoveSidebarItemsOptions {
+  type: "move_sidebar_items";
+  reqId?: string;
+  items: SidebarItemRef[];
+  parentId: string | null;
+  /** Optional insertion anchor in the destination parent. Items are inserted before it. */
+  before?: SidebarItemRef;
+}
+
+export interface DeleteFolderCommand {
+  type: "delete_folder";
+  reqId?: string;
+  folderId: string;
+  mode?: "recursive" | "unwrap";
+}
+
 export interface UndoDeleteCommand {
   type: "undo_delete";
   reqId?: string;
@@ -221,6 +253,9 @@ export type Command =
   | MoveConversationCommand
   | RenameConversationCommand
   | CloneConversationCommand
+  | CreateFolderCommand
+  | MoveSidebarItemsCommand
+  | DeleteFolderCommand
   | UndoDeleteCommand
   | QueueMessageCommand
   | UnqueueMessageCommand
@@ -335,6 +370,7 @@ export interface ConversationsListEvent {
   type: "conversations_list";
   reqId?: string;
   conversations: ConversationSummary[];
+  folders?: FolderSummary[];
 }
 
 export interface AIMessagePayload {
@@ -397,6 +433,7 @@ export interface ConversationPinnedEvent {
 export interface ConversationMovedEvent {
   type: "conversation_moved";
   conversations: ConversationSummary[];
+  folders?: FolderSummary[];
 }
 
 export interface UserMessageEvent {

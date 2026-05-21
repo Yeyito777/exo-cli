@@ -35,7 +35,7 @@
  */
 
 import { Connection } from "./conn";
-import { send, list, info, history, deleteConversation, abort, queue, rename, llm, transcribeAudio, status, type OutputOptions } from "./commands";
+import { send, list, jobs, folderList, folderTree, folderMkdir, folderMove, folderRemove, info, history, deleteConversation, abort, queue, rename, llm, transcribeAudio, status, type OutputOptions } from "./commands";
 import { printHelp, printCommandHelp, hasCommandHelp } from "./help";
 import { inferProviderForModel, isProviderId, normalizeModelForProvider, parseModelSpecifier } from "./model-spec";
 import { setRepoRootOverride, setWorktreeOverride, sourceRepoRoot, worktreeName } from "./shared/paths";
@@ -43,7 +43,22 @@ import type { ModelId, ProviderId } from "./shared/protocol";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
-const SUBCOMMANDS = new Set(["send", "list", "info", "history", "delete", "abort", "queue", "rename", "llm", "transcribe", "status", "help"]);
+const SUBCOMMANDS = new Set([
+  "send",
+  "list",
+  "jobs",
+  "folder",
+  "info",
+  "history",
+  "delete",
+  "abort",
+  "queue",
+  "rename",
+  "llm",
+  "transcribe",
+  "status",
+  "help",
+]);
 
 // Small Unix-style aliases only. Canonical commands are listed above.
 const ALIASES: Record<string, string> = {
@@ -297,6 +312,40 @@ async function main(): Promise<number> {
     switch (args.subcommand) {
       case "list":
         return await list(conn, opts);
+
+      case "jobs":
+        return await jobs(conn, opts);
+
+      case "folder": {
+        const action = args.positionals[0] ?? "ls";
+        const rest = args.positionals.slice(1);
+        switch (action) {
+          case "ls":
+            return await folderList(conn, rest[0] ?? "/", opts);
+          case "tree":
+            return await folderTree(conn, rest[0] ?? "/", opts);
+          case "mkdir": {
+            const path = rest.join(" ").trim();
+            if (!path) { process.stderr.write("Usage: exo folder mkdir <path>\nRun 'exo folder --help' for details.\n"); return 1; }
+            return await folderMkdir(conn, path, opts);
+          }
+          case "mv": {
+            if (rest.length < 2) { process.stderr.write("Usage: exo folder mv <source...> <dest>\nRun 'exo folder --help' for details.\n"); return 1; }
+            const destination = rest.at(-1)!;
+            const sources = rest.slice(0, -1).flatMap((part) => part.split(",")).map((part) => part.trim()).filter(Boolean);
+            return await folderMove(conn, sources, destination, opts);
+          }
+          case "rm": {
+            const path = rest.join(" ").trim();
+            if (!path) { process.stderr.write("Usage: exo folder rm <path>\nRun 'exo folder --help' for details.\n"); return 1; }
+            return await folderRemove(conn, path, opts);
+          }
+          default:
+            process.stderr.write(`Unknown folder command: ${action}\n\n`);
+            printCommandHelp("folder");
+            return 1;
+        }
+      }
 
       case "status":
         return await status(conn, opts);

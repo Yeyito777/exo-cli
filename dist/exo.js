@@ -328,6 +328,126 @@ function autoTitle(text) {
 `)[0].trim();
   return "cli: " + truncate(firstLine, 75);
 }
+async function fetchSidebarState(conn) {
+  const reqId = nextReqId();
+  const event = await conn.request({ type: "list_conversations", reqId }, (e) => e.type === "conversations_list" && e.reqId === reqId);
+  return { conversations: event.conversations, folders: event.folders ?? [] };
+}
+function normalizeFolderPath(input) {
+  const trimmed = (input ?? "/").trim();
+  if (!trimmed || trimmed === "/")
+    return "/";
+  return trimmed.replace(/^\/+/, "").replace(/\/+$/, "");
+}
+function folderPath(folders, folderId) {
+  if (!folderId)
+    return "/";
+  const names = [];
+  const seen = new Set;
+  let folder = folders.find((f) => f.id === folderId);
+  while (folder && !seen.has(folder.id)) {
+    seen.add(folder.id);
+    names.unshift(folder.name);
+    folder = folder.parentId ? folders.find((f) => f.id === folder?.parentId) : undefined;
+  }
+  return names.length ? names.join("/") : "/";
+}
+function resolveFolderPath(state, input) {
+  const normalized = normalizeFolderPath(input);
+  if (normalized === "/")
+    return { kind: "root", folderId: null, path: "/" };
+  const byPath = state.folders.find((f) => folderPath(state.folders, f.id).toLowerCase() === normalized.toLowerCase());
+  if (byPath)
+    return { kind: "folder", folder: byPath, folderId: byPath.id, path: folderPath(state.folders, byPath.id) };
+  return null;
+}
+function directChildFolders(state, parentId) {
+  return state.folders.filter((folder) => (folder.parentId ?? null) === parentId).sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+}
+function directChildConversations(state, parentId) {
+  return state.conversations.filter((conversation) => (conversation.folderId ?? null) === parentId).sort((a, b) => a.sortOrder - b.sortOrder || (a.title || "").localeCompare(b.title || ""));
+}
+function childItemCount(state, parentId) {
+  return directChildFolders(state, parentId).length + directChildConversations(state, parentId).length;
+}
+function jobStatus(c) {
+  if (c.streaming)
+    return "running";
+  if (c.unread)
+    return "done";
+  return null;
+}
+function conversationStatusLabel(c) {
+  return jobStatus(c) ?? "idle";
+}
+function sidebarItemParent(state, item) {
+  if (item.type === "conversation")
+    return state.conversations.find((c) => c.id === item.id)?.folderId ?? null;
+  return state.folders.find((f) => f.id === item.id)?.parentId ?? null;
+}
+function descendantsOfFolder(state, folderId) {
+  const ids = new Set([folderId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of state.folders) {
+      if (folder.parentId && ids.has(folder.parentId) && !ids.has(folder.id)) {
+        ids.add(folder.id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
+}
+function resolveSidebarItem(state, input) {
+  const conversation = state.conversations.find((c) => c.id === input);
+  if (conversation)
+    return { type: "conversation", id: conversation.id };
+  const folder = resolveFolderPath(state, input);
+  if (folder?.kind === "folder")
+    return { type: "folder", id: folder.folderId };
+  throw new Error(`No conversation ID or folder path found for ${JSON.stringify(input)}`);
+}
+function resolveMoveDestination(state, items, input) {
+  const raw = input.trim();
+  if (raw === "..") {
+    const parents = new Set(items.map((item) => sidebarItemParent(state, item)));
+    if (parents.has(undefined))
+      throw new Error("Cannot resolve parent for one or more source items");
+    if (parents.size !== 1)
+      throw new Error("'..' requires all source items to currently be in the same folder");
+    const currentParent = [...parents][0] ?? null;
+    if (!currentParent)
+      return { kind: "root", folderId: null, path: "/" };
+    const folder = state.folders.find((f) => f.id === currentParent);
+    if (!folder?.parentId)
+      return { kind: "root", folderId: null, path: "/" };
+    const parent = state.folders.find((f) => f.id === folder.parentId);
+    if (!parent)
+      return { kind: "root", folderId: null, path: "/" };
+    return { kind: "folder", folder: parent, folderId: parent.id, path: folderPath(state.folders, parent.id) };
+  }
+  const destination = resolveFolderPath(state, raw);
+  if (!destination)
+    throw new Error(`Folder not found: ${input}`);
+  for (const item of items) {
+    if (item.type === "folder" && destination.folderId && descendantsOfFolder(state, item.id).has(destination.folderId)) {
+      throw new Error("Cannot move a folder into itself or one of its descendants");
+    }
+  }
+  return destination;
+}
+function flattenFolderTree(state, parentId, depth = 0) {
+  const rows = [];
+  for (const folder of directChildFolders(state, parentId)) {
+    rows.push({ depth, type: "folder", id: folder.id, name: folder.name, path: folderPath(state.folders, folder.id), children: childItemCount(state, folder.id) });
+    rows.push(...flattenFolderTree(state, folder.id, depth + 1));
+  }
+  for (const conversation of directChildConversations(state, parentId)) {
+    rows.push({ depth, type: "conversation", id: conversation.id, name: conversation.title || "(untitled)", path: folderPath(state.folders, conversation.folderId ?? null), status: conversationStatusLabel(conversation) });
+  }
+  return rows;
+}
 function makeLiveStreamCallback(targetConvId, full) {
   let wroteAnything = false;
   let atLineStart = true;
@@ -462,8 +582,7 @@ exo:${response.convId}
   return 0;
 }
 async function list(conn, opts) {
-  const reqId = nextReqId();
-  const event = await conn.request({ type: "list_conversations", reqId }, (e) => e.type === "conversations_list" && e.reqId === reqId);
+  const event = await fetchSidebarState(conn);
   if (opts.json) {
     process.stdout.write(JSON.stringify(event.conversations) + `
 `);
@@ -481,6 +600,230 @@ async function list(conn, opts) {
 `);
       }
     }
+  }
+  return 0;
+}
+async function jobs(conn, opts) {
+  const { conversations } = await fetchSidebarState(conn);
+  const activeJobs = conversations.map((conversation) => ({ conversation, status: jobStatus(conversation) })).filter((entry) => entry.status !== null);
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(activeJobs.map(({ conversation, status }) => ({
+      id: conversation.id,
+      title: conversation.title || "",
+      status,
+      running: status === "running",
+      done: status === "done",
+      streaming: conversation.streaming,
+      completed: conversation.unread && !conversation.streaming
+    }))) + `
+`);
+    return 0;
+  }
+  if (activeJobs.length === 0) {
+    process.stdout.write(`No jobs.
+`);
+    return 0;
+  }
+  for (const { conversation, status } of activeJobs) {
+    process.stdout.write(`${conversation.id}  ${status}  ${conversation.title || "(untitled)"}
+`);
+  }
+  return 0;
+}
+async function folderList(conn, path, opts) {
+  const state = await fetchSidebarState(conn);
+  const target = resolveFolderPath(state, path);
+  if (!target)
+    throw new Error(`Folder not found: ${path ?? "/"}`);
+  const folders = directChildFolders(state, target.folderId);
+  const conversations = directChildConversations(state, target.folderId);
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({
+      path: target.path,
+      folderId: target.folderId,
+      folders: folders.map((folder) => ({ id: folder.id, name: folder.name, path: folderPath(state.folders, folder.id), children: childItemCount(state, folder.id) })),
+      conversations: conversations.map((conversation) => ({
+        id: conversation.id,
+        title: conversation.title || "",
+        status: conversationStatusLabel(conversation),
+        streaming: conversation.streaming,
+        completed: conversation.unread && !conversation.streaming
+      }))
+    }) + `
+`);
+    return 0;
+  }
+  process.stdout.write(`${target.path}
+`);
+  if (folders.length === 0 && conversations.length === 0) {
+    process.stdout.write(`  (empty)
+`);
+    return 0;
+  }
+  for (const folder of folders) {
+    process.stdout.write(`  ${folder.name}/
+`);
+  }
+  for (const conversation of conversations) {
+    process.stdout.write(`  ${conversation.id}  ${conversationStatusLabel(conversation)}  ${conversation.title || "(untitled)"}
+`);
+  }
+  return 0;
+}
+async function folderTree(conn, path, opts) {
+  const state = await fetchSidebarState(conn);
+  const target = resolveFolderPath(state, path);
+  if (!target)
+    throw new Error(`Folder not found: ${path ?? "/"}`);
+  const rows = flattenFolderTree(state, target.folderId);
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ path: target.path, folderId: target.folderId, entries: rows }) + `
+`);
+    return 0;
+  }
+  process.stdout.write(`${target.path}
+`);
+  if (rows.length === 0) {
+    process.stdout.write(`  (empty)
+`);
+    return 0;
+  }
+  for (const row of rows) {
+    const indent = "  ".repeat(row.depth + 1);
+    if (row.type === "folder") {
+      process.stdout.write(`${indent}${row.name}/
+`);
+    } else {
+      process.stdout.write(`${indent}${row.id}  ${row.status}  ${row.name}
+`);
+    }
+  }
+  return 0;
+}
+async function createFolderAndRefresh(conn, name, parentId) {
+  const reqId = nextReqId();
+  await conn.request({ type: "create_folder", reqId, name, parentId, items: [] }, (e) => e.type === "ack" && e.reqId === reqId);
+  return await fetchSidebarState(conn);
+}
+async function folderMkdir(conn, path, opts) {
+  const normalized = normalizeFolderPath(path);
+  if (normalized === "/")
+    throw new Error("Cannot create root folder");
+  const parts = normalized.split("/").filter(Boolean);
+  let state = await fetchSidebarState(conn);
+  let parentId = null;
+  let currentPath = "";
+  const created = [];
+  for (const part of parts) {
+    currentPath = currentPath ? `${currentPath}/${part}` : part;
+    const existing = state.folders.find((folder) => (folder.parentId ?? null) === parentId && folder.name.toLowerCase() === part.toLowerCase());
+    if (existing) {
+      parentId = existing.id;
+      continue;
+    }
+    state = await createFolderAndRefresh(conn, part, parentId);
+    const made = state.folders.find((folder) => (folder.parentId ?? null) === parentId && folder.name.toLowerCase() === part.toLowerCase());
+    if (!made)
+      throw new Error(`Folder was created but could not be found again: ${currentPath}`);
+    created.push({ name: part, path: currentPath, parentId });
+    parentId = made.id;
+  }
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ path: normalized, created }) + `
+`);
+  } else if (created.length === 0) {
+    process.stdout.write(`Folder already exists: ${normalized}
+`);
+  } else {
+    process.stdout.write(`Created ${created.map((folder) => folder.path).join(", ")}
+`);
+  }
+  return 0;
+}
+async function folderMove(conn, sources, destinationInput, opts) {
+  const state = await fetchSidebarState(conn);
+  const items = sources.map((source) => resolveSidebarItem(state, source));
+  const seen = new Set;
+  const uniqueItems = items.filter((item) => {
+    const key = `${item.type}:${item.id}`;
+    if (seen.has(key))
+      return false;
+    seen.add(key);
+    return true;
+  });
+  if (uniqueItems.length === 0)
+    throw new Error("folder mv requires at least one source");
+  const destination = resolveMoveDestination(state, uniqueItems, destinationInput);
+  await new Promise((resolve2, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timeout waiting for folder move"));
+    }, opts.timeout);
+    const handler = (event) => {
+      if (event.type !== "conversation_moved")
+        return;
+      const folders = event.folders ?? state.folders;
+      const allMoved = uniqueItems.every((item) => {
+        if (item.type === "conversation") {
+          const conversation = event.conversations.find((c) => c.id === item.id);
+          return conversation && (conversation.folderId ?? null) === destination.folderId;
+        }
+        const folder = folders.find((f) => f.id === item.id);
+        return folder && (folder.parentId ?? null) === destination.folderId;
+      });
+      if (!allMoved)
+        return;
+      cleanup();
+      resolve2();
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      conn.offEvent(handler);
+    };
+    conn.onEvent(handler);
+    conn.send({ type: "move_sidebar_items", items: uniqueItems, parentId: destination.folderId });
+  });
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ items: uniqueItems, folderId: destination.folderId, folder: destination.path }) + `
+`);
+  } else {
+    process.stdout.write(`Moved ${uniqueItems.length} item(s) to ${destination.path}
+`);
+  }
+  return 0;
+}
+async function folderRemove(conn, path, opts) {
+  const state = await fetchSidebarState(conn);
+  const target = resolveFolderPath(state, path);
+  if (!target || target.kind !== "folder")
+    throw new Error(`Folder not found: ${path}`);
+  await new Promise((resolve2, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timeout waiting for folder removal"));
+    }, opts.timeout);
+    const handler = (event) => {
+      if (event.type !== "conversation_moved")
+        return;
+      const folders = event.folders ?? [];
+      if (folders.some((folder) => folder.id === target.folderId))
+        return;
+      cleanup();
+      resolve2();
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      conn.offEvent(handler);
+    };
+    conn.onEvent(handler);
+    conn.send({ type: "delete_folder", folderId: target.folderId, mode: "recursive" });
+  });
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ removed: target.path, folderId: target.folderId }) + `
+`);
+  } else {
+    process.stdout.write(`Removed ${target.path}/
+`);
   }
   return 0;
 }
@@ -681,8 +1024,10 @@ ${b("USAGE")}
   cat file | exo send -                             Read message from stdin
 
 ${b("COMMANDS")}
+  ${b("Chat")}
   send "message"                    Send a message to the AI
   list                              List conversations
+  jobs                              List running/done conversation jobs
   info <id>                         Conversation metadata
   history <id>                      Conversation history
   delete <id>                       Delete a conversation
@@ -693,6 +1038,13 @@ ${b("COMMANDS")}
   transcribe <audio-file>           Transcribe audio through exocortexd
   status                            Check if daemon is running
   help [command]                    Show help
+
+  ${b("Folder management")}
+  folder ls [path]                  List folder contents
+  folder tree [path]                Show a recursive folder tree
+  folder mkdir <path>               Create folder path(s)
+  folder mv <source...> <dest>      Move conversations/folders
+  folder rm <path>                  Delete a folder recursively
 
 ${b("ALIASES")}
   ls -> list        rm -> delete        mv -> rename
@@ -778,6 +1130,50 @@ ${INSTANCE_FLAG_SUMMARY}
 ${b("OUTPUT")}
   Default: table with ID, model, message count, title, last updated.
   Pinned conversations show \uD83D\uDCCC, marked conversations show \u2605.
+`,
+  jobs: `${b("exo jobs")} [flags]
+
+List active conversation jobs: currently running streams and completed jobs
+that still have the TUI's done/unread indicator.
+
+${b("USAGE")}
+  exo jobs
+  exo jobs --json
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
+  --json                            Output as JSON array
+
+${b("OUTPUT")}
+  Conversation ID, status (running or done), and title.
+`,
+  folder: `${b("exo folder")} <ls|tree|mkdir|mv|rm> [...]
+
+Filesystem-like sidebar folder operations for conversations and folders.
+Paths are slash-separated folder paths. Use / for the top level. In mv,
+use .. to move items to the parent of their current common folder.
+
+${b("USAGE")}
+  exo folder ls /                         List top-level folders/conversations
+  exo folder ls record/                   List a folder
+  exo folder tree /                       Show the whole tree
+  exo folder mkdir record/clips           Create nested folders as needed
+  exo folder mv <convId> record/clips/    Move a conversation into a folder
+  exo folder mv Work/Clients /            Move a folder to the top level
+  exo folder mv <convId> ..               Move to parent of current folder
+  exo folder rm record/clips              Delete a folder recursively
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
+  --json                            Output as JSON
+  --timeout <sec>                   Max wait time for mutations (default 300)
+
+${b("SUBCOMMANDS")}
+  ls [path]                         List direct children of path
+  tree [path]                       Show recursive folder contents
+  mkdir <path>                      Create one or more folder path components
+  mv <source...> <dest>             Move conversation IDs or folder paths
+  rm <path>                         Recursively delete a folder
 `,
   info: `${b("exo info")} <id> [flags]
 
@@ -939,7 +1335,22 @@ function hasCommandHelp(command) {
 }
 
 // src/main.ts
-var SUBCOMMANDS = new Set(["send", "list", "info", "history", "delete", "abort", "queue", "rename", "llm", "transcribe", "status", "help"]);
+var SUBCOMMANDS = new Set([
+  "send",
+  "list",
+  "jobs",
+  "folder",
+  "info",
+  "history",
+  "delete",
+  "abort",
+  "queue",
+  "rename",
+  "llm",
+  "transcribe",
+  "status",
+  "help"
+]);
 var ALIASES = {
   ls: "list",
   rm: "delete",
@@ -1185,6 +1596,55 @@ async function main() {
     switch (args.subcommand) {
       case "list":
         return await list(conn, opts);
+      case "jobs":
+        return await jobs(conn, opts);
+      case "folder": {
+        const action = args.positionals[0] ?? "ls";
+        const rest = args.positionals.slice(1);
+        switch (action) {
+          case "ls":
+            return await folderList(conn, rest[0] ?? "/", opts);
+          case "tree":
+            return await folderTree(conn, rest[0] ?? "/", opts);
+          case "mkdir": {
+            const path = rest.join(" ").trim();
+            if (!path) {
+              process.stderr.write(`Usage: exo folder mkdir <path>
+Run 'exo folder --help' for details.
+`);
+              return 1;
+            }
+            return await folderMkdir(conn, path, opts);
+          }
+          case "mv": {
+            if (rest.length < 2) {
+              process.stderr.write(`Usage: exo folder mv <source...> <dest>
+Run 'exo folder --help' for details.
+`);
+              return 1;
+            }
+            const destination = rest.at(-1);
+            const sources = rest.slice(0, -1).flatMap((part) => part.split(",")).map((part) => part.trim()).filter(Boolean);
+            return await folderMove(conn, sources, destination, opts);
+          }
+          case "rm": {
+            const path = rest.join(" ").trim();
+            if (!path) {
+              process.stderr.write(`Usage: exo folder rm <path>
+Run 'exo folder --help' for details.
+`);
+              return 1;
+            }
+            return await folderRemove(conn, path, opts);
+          }
+          default:
+            process.stderr.write(`Unknown folder command: ${action}
+
+`);
+            printCommandHelp("folder");
+            return 1;
+        }
+      }
       case "status":
         return await status(conn, opts);
       case "info": {
