@@ -5,18 +5,6 @@ export interface ModelSelection {
   model: ModelId | null;
 }
 
-const ANTHROPIC_ALIASES: Record<string, ModelId> = {
-  opus: "claude-opus-4-6",
-  "opus-4.6": "claude-opus-4-6",
-  "claude-opus-4-6": "claude-opus-4-6",
-  sonnet: "claude-sonnet-4-6",
-  "sonnet-4.6": "claude-sonnet-4-6",
-  "claude-sonnet-4-6": "claude-sonnet-4-6",
-  haiku: "claude-haiku-4-5-20251001",
-  "haiku-4.5": "claude-haiku-4-5-20251001",
-  "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
-};
-
 const DEEPSEEK_ALIASES: Record<string, ModelId> = {
   pro: "deepseek-v4-pro",
   "v4-pro": "deepseek-v4-pro",
@@ -27,13 +15,12 @@ const DEEPSEEK_ALIASES: Record<string, ModelId> = {
 };
 
 export function isProviderId(value: string): value is ProviderId {
-  return value === "anthropic" || value === "openai" || value === "deepseek";
+  return value === "openai" || value === "deepseek";
 }
 
 export function inferProviderForModel(model: ModelId | null): ProviderId | undefined {
   if (!model) return undefined;
   const lowered = model.trim().toLowerCase();
-  if (lowered in ANTHROPIC_ALIASES) return "anthropic";
   if (lowered in DEEPSEEK_ALIASES || lowered.startsWith("deepseek-")) return "deepseek";
   return undefined;
 }
@@ -41,10 +28,6 @@ export function inferProviderForModel(model: ModelId | null): ProviderId | undef
 export function normalizeModelForProvider(provider: ProviderId | null, model: string): ModelId {
   const trimmed = model.trim();
   const lowered = trimmed.toLowerCase();
-  if (provider === "anthropic" || provider === null) {
-    const anthropic = ANTHROPIC_ALIASES[lowered];
-    if (anthropic) return anthropic;
-  }
   if (provider === "deepseek" || provider === null) {
     const deepseek = DEEPSEEK_ALIASES[lowered];
     if (deepseek) return deepseek;
@@ -74,16 +57,11 @@ export function parseModelSpecifier(spec: string): ModelSelection {
     };
   }
 
-  const anthropic = ANTHROPIC_ALIASES[trimmed.toLowerCase()];
-  if (anthropic) {
-    return { provider: "anthropic", model: anthropic };
-  }
-
-  const deepseek = DEEPSEEK_ALIASES[trimmed.toLowerCase()];
+  const lowered = trimmed.toLowerCase();
+  const deepseek = DEEPSEEK_ALIASES[lowered];
   if (deepseek) {
     return { provider: "deepseek", model: deepseek };
   }
 
   return { provider: null, model: trimmed };
 }
-

@@ -9,17 +9,11 @@ const b = (s: string) => `\x1b[1m${s}\x1b[0m`;
 
 const INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target a specific worktree daemon instance`;
 
-const MODEL_FLAG_SUMMARY = `  --opus, --sonnet, --haiku         Claude model shortcuts
-  --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
-                                    claude-opus-4-6 | openai/gpt-5.5 |
-                                    deepseek/deepseek-v4-pro
-  --provider <id>                   Provider: anthropic | openai | deepseek`;
+const MODEL_FLAG_SUMMARY = `  --model <spec>                    Model: openai/gpt-5.5 | deepseek/deepseek-v4-pro
+  --provider <id>                   Provider: openai | deepseek`;
 
-const MODEL_FLAG_SUMMARY_SEND = `  --opus, --sonnet, --haiku         Claude model shortcuts
-  --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
-                                    claude-opus-4-6 | openai/gpt-5.5 |
-                                    deepseek/deepseek-v4-pro
-  --provider <id>                   Provider: anthropic | openai | deepseek`;
+const MODEL_FLAG_SUMMARY_SEND = `  --model <spec>                    Model: openai/gpt-5.5 | deepseek/deepseek-v4-pro
+  --provider <id>                   Provider: openai | deepseek`;
 
 export function printHelp(): void {
   process.stdout.write(`${b("exo")} — Exocortex CLI client
@@ -27,8 +21,6 @@ export function printHelp(): void {
 ${b("USAGE")}
   exo send "message"                               New conversation
   exo send "message" -c <id>                       Continue a conversation
-  exo send "message" --opus                        Claude Opus shortcut
-  exo send "message" --model anthropic/opus-4.6    Explicit model
   exo send "message" --provider openai --model gpt-5.4-mini
   exo send "message" --model deepseek/deepseek-v4-pro
   exo transcribe call-segment.wav --mime-type audio/wav
@@ -85,8 +77,8 @@ Send a message to the AI. Creates a new conversation unless -c is given.
 
 ${b("USAGE")}
   exo send "what is 2+2"                          New conversation
-  exo send "explain this" --opus                  Claude Opus shortcut
-  exo send "explain this" --model anthropic/opus-4.6
+  exo send "explain this" --model openai/gpt-5.5
+  exo send "explain this" --model deepseek/pro
   exo send "follow up" -c <id>                    Continue existing conversation
   cat prompt.txt | exo send -                      Read message from stdin
   echo "question" | exo send - -c <id>            Stdin + continue conversation
@@ -270,8 +262,8 @@ Useful for quick utility calls (classification, summarization, etc).
 ${b("USAGE")}
   exo llm "summarize this text"
   exo llm "translate to spanish" --system "You are a translator"
-  exo llm "refactor this" --model anthropic/sonnet-4.6
-  cat file.txt | exo llm - --system "Summarize" --haiku
+  exo llm "refactor this" --model openai/gpt-5.5
+  cat file.txt | exo llm - --system "Summarize" --model deepseek/pro
 
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}

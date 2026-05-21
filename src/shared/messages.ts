@@ -11,7 +11,7 @@
 
 // ── Providers / Models ──────────────────────────────────────────────
 
-export type ProviderId = "anthropic" | "openai" | "deepseek";
+export type ProviderId = "openai" | "deepseek";
 
 /** Provider-scoped model identifier. */
 export type ModelId = string;
@@ -25,12 +25,6 @@ export const DEFAULT_EFFORT: EffortLevel = "high";
 
 /** Maximum context window size in tokens, per model. */
 export const MAX_CONTEXT: Record<string, number> = {
-  sonnet: 1_000_000,
-  haiku: 1_000_000,
-  opus: 1_000_000,
-  "claude-sonnet-4-6": 1_000_000,
-  "claude-haiku-4-5-20251001": 1_000_000,
-  "claude-opus-4-6": 1_000_000,
   "gpt-5": 400_000,
   "gpt-5.5": 272_000,
   "gpt-5.4": 272_000,

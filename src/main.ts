@@ -19,8 +19,7 @@
  *   exo status                      Check daemon health
  *
  * Flags:
- *   --opus, --sonnet, --haiku       Anthropic model shortcuts
- *   --model <spec>                  Model spec (e.g. anthropic/opus-4.6)
+ *   --model <spec>                  Model spec (e.g. openai/gpt-5.5)
  *   --provider <id>                 Explicit provider
  *   -c, --conv <id>                 Conversation ID
  *   --json                          JSON output
@@ -105,13 +104,6 @@ function parseArgs(argv: string[]): ParsedArgs {
     const arg = argv[i];
 
     // Flags
-    if (arg === "--opus" || arg === "--sonnet" || arg === "--haiku") {
-      const selection = parseModelSpecifier(arg.slice(2));
-      result.provider = selection.provider;
-      result.model = selection.model;
-      i++;
-      continue;
-    }
     if (arg === "--provider") {
       if (i + 1 >= argv.length) {
         result.parseError = "--provider requires a value";

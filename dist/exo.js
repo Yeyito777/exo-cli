@@ -135,34 +135,37 @@ class Connection {
   }
 }
 
+// src/commands.ts
+import { readFile } from "fs/promises";
+import { extname } from "path";
+
 // src/model-spec.ts
-var ANTHROPIC_ALIASES = {
-  opus: "claude-opus-4-6",
-  "opus-4.6": "claude-opus-4-6",
-  "claude-opus-4-6": "claude-opus-4-6",
-  sonnet: "claude-sonnet-4-6",
-  "sonnet-4.6": "claude-sonnet-4-6",
-  "claude-sonnet-4-6": "claude-sonnet-4-6",
-  haiku: "claude-haiku-4-5-20251001",
-  "haiku-4.5": "claude-haiku-4-5-20251001",
-  "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001"
+var DEEPSEEK_ALIASES = {
+  pro: "deepseek-v4-pro",
+  "v4-pro": "deepseek-v4-pro",
+  "deepseek-v4-pro": "deepseek-v4-pro",
+  flash: "deepseek-v4-flash",
+  "v4-flash": "deepseek-v4-flash",
+  "deepseek-v4-flash": "deepseek-v4-flash"
 };
 function isProviderId(value) {
-  return value === "anthropic" || value === "openai";
+  return value === "openai" || value === "deepseek";
 }
 function inferProviderForModel(model) {
   if (!model)
     return;
   const lowered = model.trim().toLowerCase();
-  return lowered in ANTHROPIC_ALIASES ? "anthropic" : undefined;
+  if (lowered in DEEPSEEK_ALIASES || lowered.startsWith("deepseek-"))
+    return "deepseek";
+  return;
 }
 function normalizeModelForProvider(provider, model) {
   const trimmed = model.trim();
   const lowered = trimmed.toLowerCase();
-  if (provider === "anthropic" || provider === null) {
-    const anthropic = ANTHROPIC_ALIASES[lowered];
-    if (anthropic)
-      return anthropic;
+  if (provider === "deepseek" || provider === null) {
+    const deepseek = DEEPSEEK_ALIASES[lowered];
+    if (deepseek)
+      return deepseek;
   }
   return trimmed;
 }
@@ -186,9 +189,10 @@ function parseModelSpecifier(spec) {
       model: normalizeModelForProvider(providerPart, modelPart)
     };
   }
-  const anthropic = ANTHROPIC_ALIASES[trimmed.toLowerCase()];
-  if (anthropic) {
-    return { provider: "anthropic", model: anthropic };
+  const lowered = trimmed.toLowerCase();
+  const deepseek = DEEPSEEK_ALIASES[lowered];
+  if (deepseek) {
+    return { provider: "deepseek", model: deepseek };
   }
   return { provider: null, model: trimmed };
 }
@@ -383,7 +387,14 @@ async function send(conn, text, convId, provider, model, opts) {
   if (!convId) {
     const reqId = nextReqId();
     const title = autoTitle(text);
-    const created = await conn.request({ type: "new_conversation", reqId, provider: resolvedProvider ?? undefined, model: model ?? undefined, title }, (e) => e.type === "conversation_created" && e.reqId === reqId);
+    const created = await conn.request({
+      type: "new_conversation",
+      reqId,
+      provider: resolvedProvider ?? undefined,
+      model: model ?? undefined,
+      title,
+      subagent: opts.subagentFolder === true
+    }, (e) => e.type === "conversation_created" && e.reqId === reqId);
     convId = created.convId;
   } else if (model) {
     conn.send({ type: "set_model", convId, provider: resolvedProvider ?? undefined, model });
@@ -566,6 +577,47 @@ async function rename(conn, convId, title) {
 `);
   return 0;
 }
+function inferAudioMimeType(path) {
+  switch (extname(path).toLowerCase()) {
+    case ".wav":
+      return "audio/wav";
+    case ".mp3":
+      return "audio/mpeg";
+    case ".m4a":
+      return "audio/mp4";
+    case ".mp4":
+      return "audio/mp4";
+    case ".ogg":
+      return "audio/ogg";
+    case ".opus":
+      return "audio/ogg; codecs=opus";
+    case ".webm":
+      return "audio/webm";
+    case ".flac":
+      return "audio/flac";
+    default:
+      return "audio/wav";
+  }
+}
+async function transcribeAudio(conn, path, mimeType, opts) {
+  const reqId = nextReqId();
+  const audioBytes = await readFile(path);
+  const resolvedMimeType = mimeType ?? inferAudioMimeType(path);
+  const event = await conn.request({
+    type: "transcribe_audio",
+    reqId,
+    audioBase64: audioBytes.toString("base64"),
+    mimeType: resolvedMimeType
+  }, (e) => e.type === "transcription_result" && e.reqId === reqId, opts.timeout);
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ text: event.text, mimeType: resolvedMimeType }) + `
+`);
+  } else {
+    process.stdout.write(event.text + `
+`);
+  }
+  return 0;
+}
 async function llm(conn, userText, system, provider, model, opts) {
   const reqId = nextReqId();
   const resolvedProvider = provider ?? inferProviderForModel(model);
@@ -612,23 +664,19 @@ async function status(conn, opts) {
 // src/help.ts
 var b = (s) => `\x1B[1m${s}\x1B[0m`;
 var INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target a specific worktree daemon instance`;
-var MODEL_FLAG_SUMMARY = `  --opus, --sonnet, --haiku         Claude model shortcuts
-  --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
-                                    claude-opus-4-6 | openai/gpt-5.5
-  --provider <id>                   Provider: anthropic | openai`;
-var MODEL_FLAG_SUMMARY_SEND = `  --opus, --sonnet, --haiku         Claude model shortcuts
-  --model <spec>                    Model: opus-4.6 | anthropic/opus-4.6 |
-                                    claude-opus-4-6 | openai/gpt-5.5
-  --provider <id>                   Provider: anthropic | openai`;
+var MODEL_FLAG_SUMMARY = `  --model <spec>                    Model: openai/gpt-5.5 | deepseek/deepseek-v4-pro
+  --provider <id>                   Provider: openai | deepseek`;
+var MODEL_FLAG_SUMMARY_SEND = `  --model <spec>                    Model: openai/gpt-5.5 | deepseek/deepseek-v4-pro
+  --provider <id>                   Provider: openai | deepseek`;
 function printHelp() {
   process.stdout.write(`${b("exo")} \u2014 Exocortex CLI client
 
 ${b("USAGE")}
   exo send "message"                               New conversation
   exo send "message" -c <id>                       Continue a conversation
-  exo send "message" --opus                        Claude Opus shortcut
-  exo send "message" --model anthropic/opus-4.6    Explicit model
   exo send "message" --provider openai --model gpt-5.4-mini
+  exo send "message" --model deepseek/deepseek-v4-pro
+  exo transcribe call-segment.wav --mime-type audio/wav
   exo status --instance browse-links                Talk to a worktree daemon
   cat file | exo send -                             Read message from stdin
 
@@ -642,6 +690,7 @@ ${b("COMMANDS")}
   queue <id> "msg" [--end]          Queue message for delivery
   rename <id> <title>               Rename a conversation
   llm "text" --system "..."         One-shot LLM (no conversation)
+  transcribe <audio-file>           Transcribe audio through exocortexd
   status                            Check if daemon is running
   help [command]                    Show help
 
@@ -658,6 +707,7 @@ ${MODEL_FLAG_SUMMARY}
   --id                              Print only conversation ID
   --timeout <sec>                   Max wait time (default 300)
   --system <prompt>                 System prompt (for llm)
+  --mime-type <type>                Audio MIME type (for transcribe)
   --detach, --background            Start exo send and return immediately
   --foreground                      Disable parent-agent auto-detach for send
   --notify-parent <id>              Notify a parent conversation on send completion
@@ -679,8 +729,8 @@ Send a message to the AI. Creates a new conversation unless -c is given.
 
 ${b("USAGE")}
   exo send "what is 2+2"                          New conversation
-  exo send "explain this" --opus                  Claude Opus shortcut
-  exo send "explain this" --model anthropic/opus-4.6
+  exo send "explain this" --model openai/gpt-5.5
+  exo send "explain this" --model deepseek/pro
   exo send "follow up" -c <id>                    Continue existing conversation
   cat prompt.txt | exo send -                      Read message from stdin
   echo "question" | exo send - -c <id>            Stdin + continue conversation
@@ -811,6 +861,25 @@ ${b("USAGE")}
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
 `,
+  transcribe: `${b("exo transcribe")} <audio-file> [flags]
+
+Transcribe a local audio file through exocortexd. The daemon owns OpenAI OAuth,
+so this works from detached/background processes without exposing tokens.
+
+${b("USAGE")}
+  exo transcribe segment.wav
+  exo transcribe segment.wav --mime-type audio/wav
+  exo transcribe call.webm --mime-type audio/webm --json
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
+  --mime-type <type>                Audio MIME type (default inferred from extension)
+  --json                            Output as JSON object
+  --timeout <sec>                   Max wait time (default 300)
+
+${b("OUTPUT")}
+  Default: transcript text.
+`,
   status: `${b("exo status")} [flags]
 
 Check if the daemon is running and show a quick summary.
@@ -835,8 +904,8 @@ Useful for quick utility calls (classification, summarization, etc).
 ${b("USAGE")}
   exo llm "summarize this text"
   exo llm "translate to spanish" --system "You are a translator"
-  exo llm "refactor this" --model anthropic/sonnet-4.6
-  cat file.txt | exo llm - --system "Summarize" --haiku
+  exo llm "refactor this" --model openai/gpt-5.5
+  cat file.txt | exo llm - --system "Summarize" --model deepseek/pro
 
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
@@ -870,7 +939,7 @@ function hasCommandHelp(command) {
 }
 
 // src/main.ts
-var SUBCOMMANDS = new Set(["send", "list", "info", "history", "delete", "abort", "queue", "rename", "llm", "status", "help"]);
+var SUBCOMMANDS = new Set(["send", "list", "info", "history", "delete", "abort", "queue", "rename", "llm", "transcribe", "status", "help"]);
 var ALIASES = {
   ls: "list",
   rm: "delete",
@@ -884,6 +953,7 @@ function parseArgs(argv) {
     provider: null,
     model: null,
     system: "You are a helpful assistant.",
+    mimeType: null,
     instance: null,
     json: false,
     full: false,
@@ -901,13 +971,6 @@ function parseArgs(argv) {
   let i = 0;
   while (i < argv.length) {
     const arg = argv[i];
-    if (arg === "--opus" || arg === "--sonnet" || arg === "--haiku") {
-      const selection = parseModelSpecifier(arg.slice(2));
-      result.provider = selection.provider;
-      result.model = selection.model;
-      i++;
-      continue;
-    }
     if (arg === "--provider") {
       if (i + 1 >= argv.length) {
         result.parseError = "--provider requires a value";
@@ -981,6 +1044,11 @@ function parseArgs(argv) {
     }
     if (arg === "--system" && i + 1 < argv.length) {
       result.system = argv[++i];
+      i++;
+      continue;
+    }
+    if (arg === "--mime-type" && i + 1 < argv.length) {
+      result.mimeType = argv[++i];
       i++;
       continue;
     }
@@ -1087,6 +1155,7 @@ async function main() {
   }
   const parentConvId = process.env.EXOCORTEX_PARENT_CONV_ID?.trim() || null;
   const autoDetachSend = Boolean(parentConvId) && !args.foreground && args.conv !== parentConvId;
+  const spawnedByAgent = Boolean(parentConvId) || Boolean(args.notifyParent);
   const opts = {
     json: args.json,
     full: args.full,
@@ -1094,7 +1163,8 @@ async function main() {
     idOnly: args.idOnly,
     timeout: args.timeout,
     detached: args.detach || autoDetachSend,
-    notifyParent: args.noNotify ? null : args.notifyParent ?? parentConvId
+    notifyParent: args.noNotify ? null : args.notifyParent ?? parentConvId,
+    subagentFolder: spawnedByAgent
   };
   const conn = new Connection;
   try {
@@ -1176,6 +1246,16 @@ Run 'exo llm --help' for details.
           return 1;
         }
         return await llm(conn, text, args.system, args.provider, args.model, opts);
+      }
+      case "transcribe": {
+        const path = args.positionals[0];
+        if (!path) {
+          process.stderr.write(`Usage: exo transcribe <audio-file> [--mime-type audio/wav]
+Run 'exo transcribe --help' for details.
+`);
+          return 1;
+        }
+        return await transcribeAudio(conn, path, args.mimeType, opts);
       }
       case "queue": {
         const convId = args.positionals[0];
