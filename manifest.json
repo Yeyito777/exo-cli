@@ -1,7 +1,7 @@
 {
   "name": "exo",
   "bin": "./bin/exo",
-  "systemHint": "Use `exo send` to spawn or continue persisted conversation subagents. When called from inside an Exocortex parent conversation, `exo send` runs detached by default and the daemon posts a `[notification]` back to the parent when the child completes. Use `--foreground` only when you intentionally want to block, and `--no-notify` to suppress the callback. `exo llm` is synchronous one-shot text generation and does not create a persisted conversation. Run `exo -h` for commands/options.",
+  "systemHint": "You have the ability to manage your own harness 'exocortex'. This lets you create subagents, manage conversations, etc... Run `exo -h` for usage reference.",
   "display": {
     "label": "Exocortex",
     "color": "#1d9bf0"
