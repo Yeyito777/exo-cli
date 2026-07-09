@@ -19,7 +19,7 @@
  *   exo status                      Check daemon health
  *
  * Flags:
- *   --model <spec>                  Model spec (e.g. openai/gpt-5.5)
+ *   --model <spec>                  Model spec (e.g. openai/gpt-5.6-sol)
  *   --provider <id>                 Explicit provider
  *   -c, --conv <id>                 Conversation ID
  *   --json                          JSON output

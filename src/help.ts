@@ -9,11 +9,16 @@ const b = (s: string) => `\x1b[1m${s}\x1b[0m`;
 
 const INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target a specific worktree daemon instance`;
 
-const MODEL_FLAG_SUMMARY = `  --model <spec>                    Model: openai/gpt-5.5 | deepseek/deepseek-v4-pro
+const MODEL_FLAG_SUMMARY = `  --model <spec>                    Model: openai/gpt-5.6-sol | deepseek/deepseek-v4-pro
   --provider <id>                   Provider: openai | deepseek`;
 
-const MODEL_FLAG_SUMMARY_SEND = `  --model <spec>                    Model: openai/gpt-5.5 | deepseek/deepseek-v4-pro
+const MODEL_FLAG_SUMMARY_SEND = `  --model <spec>                    Model: openai/gpt-5.6-sol | deepseek/deepseek-v4-pro
   --provider <id>                   Provider: openai | deepseek`;
+
+const SUBAGENT_MODEL_GUIDANCE = `  For OpenAI subagents, prefer the newest family: currently gpt-5.6-sol by
+  default, with gpt-5.6-terra or gpt-5.6-luna for lighter work. Use older
+  generations only when requested or required; omit --model to use the
+  configured default.`;
 
 export function printHelp(): void {
   process.stdout.write(`${b("exo")} — Exocortex CLI client
@@ -21,7 +26,7 @@ export function printHelp(): void {
 ${b("USAGE")}
   exo send "message"                               New conversation
   exo send "message" -c <id>                       Continue a conversation
-  exo send "message" --provider openai --model gpt-5.4-mini
+  exo send "message" --provider openai --model gpt-5.6-sol
   exo send "message" --model deepseek/deepseek-v4-pro
   exo transcribe call-segment.wav --mime-type audio/wav
   exo status --instance browse-links                Talk to a worktree daemon
@@ -75,6 +80,9 @@ ${b("SUBAGENTS")}
   when done. \`--timeout\` controls how long this CLI waits; detached children
   continue in the daemon until they finish or are aborted.
 
+${b("SUBAGENT MODEL SELECTION")}
+${SUBAGENT_MODEL_GUIDANCE}
+
 Run ${b("exo <command> --help")} for command-specific usage.
 `);
 }
@@ -86,7 +94,8 @@ Send a message to the AI. Creates a new conversation unless -c is given.
 
 ${b("USAGE")}
   exo send "what is 2+2"                          New conversation
-  exo send "explain this" --model openai/gpt-5.5
+  exo send "explain this" --model openai/gpt-5.6-sol
+  exo send "lighter task" --model openai/gpt-5.6-luna
   exo send "explain this" --model deepseek/pro
   exo send "follow up" -c <id>                    Continue existing conversation
   cat prompt.txt | exo send -                      Read message from stdin
@@ -109,6 +118,9 @@ ${MODEL_FLAG_SUMMARY_SEND}
 ${b("SUBAGENT BEHAVIOR")}
   When exo send is called from inside an Exocortex parent conversation, it
   automatically runs detached and the daemon notifies the parent when done.
+
+${b("SUBAGENT MODEL SELECTION")}
+${SUBAGENT_MODEL_GUIDANCE}
 
 ${b("SUBAGENT RUNTIME")}
   Detached sends return after the daemon accepts the turn. Use \`exo abort <id>\`
@@ -321,7 +333,7 @@ Useful for quick utility calls (classification, summarization, etc).
 ${b("USAGE")}
   exo llm "summarize this text"
   exo llm "translate to spanish" --system "You are a translator"
-  exo llm "refactor this" --model openai/gpt-5.5
+  exo llm "refactor this" --model openai/gpt-5.6-luna
   cat file.txt | exo llm - --system "Summarize" --model deepseek/pro
 
 ${b("FLAGS")}

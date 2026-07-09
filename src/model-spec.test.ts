@@ -14,7 +14,7 @@ describe("model-spec", () => {
   });
 
   test("leaves provider-specific openai models alone", () => {
-    expect(normalizeModelForProvider("openai", "gpt-5.4-mini")).toBe("gpt-5.4-mini");
+    expect(normalizeModelForProvider("openai", "gpt-5.6-luna")).toBe("gpt-5.6-luna");
   });
 
   test("normalizes deepseek aliases", () => {
@@ -25,13 +25,13 @@ describe("model-spec", () => {
   test("infers providers from canonical and shorthand models", () => {
     expect(inferProviderForModel("deepseek-v4-pro")).toBe("deepseek");
     expect(inferProviderForModel("pro")).toBe("deepseek");
-    expect(inferProviderForModel("gpt-5.4")).toBeUndefined();
+    expect(inferProviderForModel("gpt-5.6-sol")).toBeUndefined();
   });
 
   test("parses provider-qualified specs", () => {
-    expect(parseModelSpecifier("openai/gpt-5.4-mini")).toEqual({
+    expect(parseModelSpecifier("openai/gpt-5.6-luna")).toEqual({
       provider: "openai",
-      model: "gpt-5.4-mini",
+      model: "gpt-5.6-luna",
     });
     expect(parseModelSpecifier("deepseek/pro")).toEqual({
       provider: "deepseek",
@@ -40,9 +40,9 @@ describe("model-spec", () => {
   });
 
   test("keeps unknown unqualified models provider-agnostic", () => {
-    expect(parseModelSpecifier("gpt-5.4")).toEqual({
+    expect(parseModelSpecifier("gpt-5.6-terra")).toEqual({
       provider: null,
-      model: "gpt-5.4",
+      model: "gpt-5.6-terra",
     });
   });
 

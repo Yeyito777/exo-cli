@@ -26,6 +26,9 @@ export const DEFAULT_EFFORT: EffortLevel = "high";
 /** Maximum context window size in tokens, per model. */
 export const MAX_CONTEXT: Record<string, number> = {
   "gpt-5": 400_000,
+  "gpt-5.6-sol": 372_000,
+  "gpt-5.6-terra": 372_000,
+  "gpt-5.6-luna": 372_000,
   "gpt-5.5": 272_000,
   "gpt-5.4": 272_000,
   "gpt-5.4-mini": 272_000,
