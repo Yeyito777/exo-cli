@@ -394,8 +394,10 @@ export interface ConversationLoadedEvent {
   convId: string;
   model: ModelId;
   effort: EffortLevel;
-  /** All messages in display order. */
+  /** All messages in display order, excluding the currently in-flight assistant snapshot. */
   entries: DisplayEntry[];
+  /** Live assistant snapshot for actively streaming conversations. */
+  pendingAI?: AIMessagePayload;
   /** Last known input token count for this conversation. */
   contextTokens: number | null;
   /** Messages currently queued for delivery (so the TUI can show shadows). */

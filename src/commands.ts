@@ -680,17 +680,33 @@ export async function info(conn: Connection, convId: string, opts: OutputOptions
 
 // ── history ─────────────────────────────────────────────────────────
 
+function entriesIncludingPendingAI(event: ConversationLoadedEvent): ConversationLoadedEvent["entries"] {
+  if (!event.pendingAI) return event.entries;
+
+  // A turn can finish while a load response is in flight. The daemon normally
+  // suppresses pendingAI once that turn is committed, but use the turn's
+  // startedAt as a final guard against printing a completed assistant twice.
+  const pendingStartedAt = event.pendingAI.metadata?.startedAt;
+  const alreadyCommitted = pendingStartedAt !== undefined && event.entries.some(
+    (entry) => entry.type === "ai" && entry.metadata?.startedAt === pendingStartedAt,
+  );
+  if (alreadyCommitted) return event.entries;
+
+  return [...event.entries, { type: "ai", ...event.pendingAI }];
+}
+
 export async function history(conn: Connection, convId: string, opts: OutputOptions): Promise<number> {
   const reqId = nextReqId();
   const event = await conn.request<ConversationLoadedEvent>(
     { type: "load_conversation", reqId, convId },
     (e): e is ConversationLoadedEvent => e.type === "conversation_loaded" && e.reqId === reqId,
   );
+  const entries = entriesIncludingPendingAI(event);
 
   if (opts.json) {
-    process.stdout.write(formatEntriesAsJson(event.entries) + "\n");
+    process.stdout.write(formatEntriesAsJson(entries) + "\n");
   } else {
-    const output = formatEntriesAsText(event.entries, opts.full);
+    const output = formatEntriesAsText(entries, opts.full);
     if (output) process.stdout.write(output + "\n");
   }
 
