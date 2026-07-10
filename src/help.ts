@@ -15,6 +15,9 @@ const MODEL_FLAG_SUMMARY = `  --model <spec>                    Model: openai/gp
 const MODEL_FLAG_SUMMARY_SEND = `  --model <spec>                    Model: openai/gpt-5.6-sol | deepseek/deepseek-v4-pro
   --provider <id>                   Provider: openai | deepseek`;
 
+const SUBAGENT_WORKING_DIRECTORY_GUIDANCE = `  Subagents start in the configured global working directory. For project-specific
+  work, include the target absolute working directory in the prompt.`;
+
 const SUBAGENT_MODEL_GUIDANCE = `  For OpenAI subagents, prefer the newest family: currently gpt-5.6-sol by
   default, with gpt-5.6-terra or gpt-5.6-luna for lighter work. Use older
   generations only when requested or required; omit --model to use the
@@ -79,6 +82,7 @@ ${b("SUBAGENTS")}
   an Exocortex parent conversation it auto-detaches and notifies the parent
   when done. \`--timeout\` controls how long this CLI waits; detached children
   continue in the daemon until they finish or are aborted.
+${SUBAGENT_WORKING_DIRECTORY_GUIDANCE}
 
 ${b("SUBAGENT MODEL SELECTION")}
 ${SUBAGENT_MODEL_GUIDANCE}
@@ -118,6 +122,7 @@ ${MODEL_FLAG_SUMMARY_SEND}
 ${b("SUBAGENT BEHAVIOR")}
   When exo send is called from inside an Exocortex parent conversation, it
   automatically runs detached and the daemon notifies the parent when done.
+${SUBAGENT_WORKING_DIRECTORY_GUIDANCE}
 
 ${b("SUBAGENT MODEL SELECTION")}
 ${SUBAGENT_MODEL_GUIDANCE}

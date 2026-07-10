@@ -1,7 +1,7 @@
 {
   "name": "exo",
   "bin": "./bin/exo",
-  "systemHint": "You can manage your Exocortex harness and spawn subagents with `exo`. Run `exo -h` for usage. For OpenAI subagents, prefer the newest family—currently `gpt-5.6-sol` by default, with `gpt-5.6-terra` or `gpt-5.6-luna` for lighter work—over older generations unless requested.",
+  "systemHint": "You can manage your Exocortex harness and spawn subagents with `exo`. Run `exo -h` for usage. Subagents start in Exocortex’s global default working directory, not the caller’s current directory; include the target absolute working directory in the task prompt when relevant. For OpenAI subagents, prefer the newest family—currently `gpt-5.6-sol` by default, with `gpt-5.6-terra` or `gpt-5.6-luna` for lighter work—over older generations unless requested.",
   "display": {
     "label": "Exocortex",
     "color": "#1d9bf0"
