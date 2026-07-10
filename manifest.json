@@ -1,9 +1,9 @@
 {
   "name": "exo",
   "bin": "./bin/exo",
-  "systemHint": "Use the native `exo` internal tool to manage the current Exocortex daemon and spawn subagents. Keep this external `exo` CLI for debugging or targeting other daemon instances (for example with `exo --instance ...`). Run `exo -h` for CLI usage. Subagents start in Exocortex’s global default working directory, not the caller’s current directory; include the target absolute working directory in the task prompt when relevant.",
+  "systemHint": "This external `exo` CLI is a daemon debugging/admin tool. Inside an Exocortex conversation, use the native `exo` internal tool for the current daemon. Use this CLI to inspect or control other daemon/worktree instances (for example with `exo --instance ...`), troubleshoot socket/protocol behavior, or transcribe audio, which the internal tool does not support. Run `exo -h` for CLI usage. Subagents started through this debug client use Exocortex’s global default working directory, so include the target absolute working directory in the task prompt when relevant.",
   "display": {
-    "label": "Exocortex",
+    "label": "Exocortex Debug CLI",
     "color": "#1d9bf0"
   },
   "shell": {

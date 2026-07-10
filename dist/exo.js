@@ -878,14 +878,24 @@ async function info(conn, convId, opts) {
   }
   return 0;
 }
+function entriesIncludingPendingAI(event) {
+  if (!event.pendingAI)
+    return event.entries;
+  const pendingStartedAt = event.pendingAI.metadata?.startedAt;
+  const alreadyCommitted = pendingStartedAt !== undefined && event.entries.some((entry) => entry.type === "ai" && entry.metadata?.startedAt === pendingStartedAt);
+  if (alreadyCommitted)
+    return event.entries;
+  return [...event.entries, { type: "ai", ...event.pendingAI }];
+}
 async function history(conn, convId, opts) {
   const reqId = nextReqId();
   const event = await conn.request({ type: "load_conversation", reqId, convId }, (e) => e.type === "conversation_loaded" && e.reqId === reqId);
+  const entries = entriesIncludingPendingAI(event);
   if (opts.json) {
-    process.stdout.write(formatEntriesAsJson(event.entries) + `
+    process.stdout.write(formatEntriesAsJson(entries) + `
 `);
   } else {
-    const output = formatEntriesAsText(event.entries, opts.full);
+    const output = formatEntriesAsText(entries, opts.full);
     if (output)
       process.stdout.write(output + `
 `);
@@ -1006,7 +1016,7 @@ async function status(conn, opts) {
 
 // src/help.ts
 var b = (s) => `\x1B[1m${s}\x1B[0m`;
-var INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target a specific worktree daemon instance`;
+var INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target another worktree daemon instance`;
 var MODEL_FLAG_SUMMARY = `  --model <spec>                    Model: openai/gpt-5.6-sol | deepseek/deepseek-v4-pro
   --provider <id>                   Provider: openai | deepseek`;
 var MODEL_FLAG_SUMMARY_SEND = `  --model <spec>                    Model: openai/gpt-5.6-sol | deepseek/deepseek-v4-pro
@@ -1018,16 +1028,21 @@ var SUBAGENT_MODEL_GUIDANCE = `  For OpenAI subagents, prefer the newest family:
   generations only when requested or required; omit --model to use the
   configured default.`;
 function printHelp() {
-  process.stdout.write(`${b("exo")} \u2014 Exocortex CLI client
+  process.stdout.write(`${b("exo")} \u2014 Exocortex daemon debugging CLI
+
+${b("PURPOSE")}
+  Debug, inspect, and control Exocortex daemon instances from the shell. Inside
+  an Exocortex conversation, use the native ${b("exo")} internal tool for the
+  current daemon. Use this external CLI primarily to target another daemon or
+  worktree with --instance, troubleshoot socket/protocol behavior, or transcribe
+  audio.
 
 ${b("USAGE")}
-  exo send "message"                               New conversation
-  exo send "message" -c <id>                       Continue a conversation
-  exo send "message" --provider openai --model gpt-5.6-sol
-  exo send "message" --model deepseek/deepseek-v4-pro
+  exo status --instance browse-links                Inspect another daemon
+  exo list --instance browse-links                  List its conversations
+  exo send "diagnose this" --instance browse-links  Send to that daemon
   exo transcribe call-segment.wav --mime-type audio/wav
-  exo status --instance browse-links                Talk to a worktree daemon
-  cat file | exo send -                             Read message from stdin
+  exo status                                         Inspect the default daemon
 
 ${b("COMMANDS")}
   ${b("Chat")}

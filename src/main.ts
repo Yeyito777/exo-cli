@@ -1,7 +1,10 @@
 /**
- * exo — Exocortex CLI client.
+ * exo — Exocortex daemon debugging CLI.
  *
- * A stateless, machine-friendly interface to exocortexd.
+ * A stateless, machine-friendly shell client for debugging, inspecting, and
+ * administering exocortexd instances. AI conversations should use the native
+ * exo internal tool for their current daemon; this external client remains for
+ * other instances, protocol/socket troubleshooting, and audio transcription.
  * Each invocation connects, does its work, and disconnects.
  * The daemon holds all state; conversation IDs are the handles.
  *
