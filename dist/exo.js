@@ -1040,22 +1040,22 @@ ${b("PURPOSE")}
 ${b("USAGE")}
   exo status --instance browse-links                Inspect another daemon
   exo list --instance browse-links                  List its conversations
-  exo send "diagnose this" --instance browse-links  Send to that daemon
+  printf '%s' 'diagnose this' | exo send --instance browse-links
   exo transcribe call-segment.wav --mime-type audio/wav
   exo status                                         Inspect the default daemon
 
 ${b("COMMANDS")}
   ${b("Chat")}
-  send "message"                    Send a message to the AI
+  send                              Send stdin message to the AI
   list                              List conversations
   jobs                              List running/done conversation jobs
   info <id>                         Conversation metadata
   history <id>                      Conversation history
   delete <id>                       Delete a conversation
   abort <id>                        Abort an in-flight stream
-  queue <id> "msg" [--end]          Queue message for delivery
+  queue <id> [--end]                Queue stdin message for delivery
   rename <id> <title>               Rename a conversation
-  llm "text" --system "..."         One-shot LLM (no conversation)
+  llm [--system-file <path>]        One-shot LLM from stdin
   transcribe <audio-file>           Transcribe audio through exocortexd
   status                            Check if daemon is running
   help [command]                    Show help
@@ -1079,7 +1079,7 @@ ${MODEL_FLAG_SUMMARY}
   --stream                          Stream events as NDJSON
   --id                              Print only conversation ID
   --timeout <sec>                   Max wait time (default 300)
-  --system <prompt>                 System prompt (for llm)
+  --system-file <path>              Custom system prompt file (for llm)
   --mime-type <type>                Audio MIME type (for transcribe)
   --detach, --background            Start exo send and return immediately
   --foreground                      Disable parent-agent auto-detach for send
@@ -1096,22 +1096,25 @@ ${SUBAGENT_WORKING_DIRECTORY_GUIDANCE}
 ${b("SUBAGENT MODEL SELECTION")}
 ${SUBAGENT_MODEL_GUIDANCE}
 
+${b("PAYLOAD INPUT")}
+  send, queue, and llm read their exact UTF-8 message/prompt from stdin.
+  Inline payload arguments are rejected. Structural values remain argv.
+
 Run ${b("exo <command> --help")} for command-specific usage.
 `);
 }
 var COMMAND_HELP = {
-  send: `${b("exo send")} "message" [flags]
+  send: `${b("exo send")} [flags]
 
-Send a message to the AI. Creates a new conversation unless -c is given.
+Send an exact UTF-8 message from stdin. Creates a new conversation unless -c is
+given. Inline message arguments are not accepted.
 
 ${b("USAGE")}
-  exo send "what is 2+2"                          New conversation
-  exo send "explain this" --model openai/gpt-5.6-sol
-  exo send "lighter task" --model openai/gpt-5.6-luna
-  exo send "explain this" --model deepseek/pro
-  exo send "follow up" -c <id>                    Continue existing conversation
-  cat prompt.txt | exo send -                      Read message from stdin
-  echo "question" | exo send - -c <id>            Stdin + continue conversation
+  printf '%s' 'what is 2+2' | exo send             New conversation
+  cat prompt.txt | exo send --model openai/gpt-5.6-sol
+  printf '%s' 'lighter task' | exo send --model openai/gpt-5.6-luna
+  cat prompt.txt | exo send --model deepseek/pro
+  printf '%s' 'follow up' | exo send -c <id>       Continue conversation
 
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
@@ -1259,18 +1262,19 @@ ${b("USAGE")}
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
 `,
-  queue: `${b("exo queue")} <id> "message" [--end]
+  queue: `${b("exo queue")} <id> [--end]
 
-Queue a message for delivery to a conversation. The message is held by the
-daemon and injected automatically \u2014 either before the next AI turn (default)
-or appended after the current response finishes (--end).
+Queue an exact UTF-8 message from stdin for delivery to a conversation. Inline
+message arguments are not accepted. The message is held by the daemon and
+injected automatically \u2014 either before the next AI turn (default) or appended
+after the current response finishes (--end).
 
 Useful when a conversation is actively streaming and \`exo send\` would fail
 with "Already streaming".
 
 ${b("USAGE")}
-  exo queue <convId> "message"           Queue for next turn (default)
-  exo queue <convId> "message" --end     Queue for message-end delivery
+  printf '%s' 'message' | exo queue <convId>       Queue for next turn
+  printf '%s' 'message' | exo queue <convId> --end Queue for message-end
 
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
@@ -1322,20 +1326,23 @@ ${b("OUTPUT")}
   Daemon latency, conversation count, active streams.
   Exit code 2 if daemon is not running.
 `,
-  llm: `${b("exo llm")} "text" [flags]
+  llm: `${b("exo llm")} [flags]
 
-One-shot LLM completion. No conversation is created or persisted.
-Useful for quick utility calls (classification, summarization, etc).
+One-shot LLM completion from an exact UTF-8 stdin prompt. No conversation is
+created or persisted. Inline prompts are not accepted. A custom secondary
+system prompt comes from --system-file because stdin is reserved for the
+primary prompt.
 
 ${b("USAGE")}
-  exo llm "summarize this text"
-  exo llm "translate to spanish" --system "You are a translator"
-  exo llm "refactor this" --model openai/gpt-5.6-luna
-  cat file.txt | exo llm - --system "Summarize" --model deepseek/pro
+  printf '%s' 'summarize this text' | exo llm
+  printf '%s' 'translate this' | exo llm --system-file translator.txt
+  cat file.txt | exo llm --model openai/gpt-5.6-luna
+  cat file.txt | exo llm --system-file summarize.txt --model deepseek/pro
 
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
-  --system <prompt>                 System prompt (default: "You are a helpful assistant.")
+  --system-file <path>              Exact UTF-8 system prompt file
+                                     (default: "You are a helpful assistant.")
 ${MODEL_FLAG_SUMMARY_SEND}
   --json                            Output as JSON object
   --timeout <sec>                   Max wait time (default 300)
@@ -1362,6 +1369,44 @@ function printCommandHelp(command) {
 function hasCommandHelp(command) {
   const resolved = resolveHelp(command);
   return resolved in COMMAND_HELP;
+}
+
+// src/payload.ts
+import { readFile as readFile2 } from "fs/promises";
+var DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
+function decodeExactUtf8(bytes, label) {
+  if (bytes.byteLength === 0) {
+    throw new Error(`${label} is required on stdin`);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw new Error(`${label} on stdin must be valid UTF-8`);
+  }
+}
+async function readExactStdin(label) {
+  const chunks = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+  return decodeExactUtf8(Buffer.concat(chunks), label);
+}
+async function readExactUtf8File(path, label) {
+  let bytes;
+  try {
+    bytes = await readFile2(path);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`could not read ${label} file '${path}': ${detail}`);
+  }
+  if (bytes.byteLength === 0) {
+    throw new Error(`${label} file '${path}' is empty`);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw new Error(`${label} file '${path}' must contain valid UTF-8`);
+  }
 }
 
 // src/main.ts
@@ -1393,7 +1438,7 @@ function parseArgs(argv) {
     conv: null,
     provider: null,
     model: null,
-    system: "You are a helpful assistant.",
+    systemFile: null,
     mimeType: null,
     instance: null,
     json: false,
@@ -1407,7 +1452,9 @@ function parseArgs(argv) {
     foreground: false,
     notifyParent: null,
     noNotify: false,
-    parseError: null
+    parseError: null,
+    parseErrorCode: 1,
+    parseErrorShowsHelp: true
   };
   let i = 0;
   while (i < argv.length) {
@@ -1483,8 +1530,35 @@ function parseArgs(argv) {
       i++;
       continue;
     }
-    if (arg === "--system" && i + 1 < argv.length) {
-      result.system = argv[++i];
+    if (arg === "--system" || arg.startsWith("--system=")) {
+      result.parseError = "--system is not accepted; use --system-file <path>";
+      result.parseErrorCode = 2;
+      result.parseErrorShowsHelp = false;
+      return result;
+    }
+    if (arg === "--system-file") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--system-file requires a path";
+        return result;
+      }
+      if (result.systemFile !== null) {
+        result.parseError = "--system-file may only be provided once";
+        return result;
+      }
+      result.systemFile = argv[++i];
+      i++;
+      continue;
+    }
+    if (arg.startsWith("--system-file=")) {
+      if (result.systemFile !== null) {
+        result.parseError = "--system-file may only be provided once";
+        return result;
+      }
+      result.systemFile = arg.slice("--system-file=".length);
+      if (!result.systemFile) {
+        result.parseError = "--system-file requires a path";
+        return result;
+      }
       i++;
       continue;
     }
@@ -1546,13 +1620,6 @@ function parseArgs(argv) {
   }
   return result;
 }
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString("utf-8").trim();
-}
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.subcommand === "help") {
@@ -1574,10 +1641,13 @@ async function main() {
   }
   if (args.parseError) {
     process.stderr.write(`Error: ${args.parseError}
-
 `);
-    printHelp();
-    return 1;
+    if (args.parseErrorShowsHelp) {
+      process.stderr.write(`
+`);
+      printHelp();
+    }
+    return args.parseErrorCode;
   }
   if (!args.subcommand && args.positionals.length === 0) {
     printHelp();
@@ -1589,6 +1659,49 @@ async function main() {
 `);
     printHelp();
     return 1;
+  }
+  let primaryPayload = null;
+  let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+  try {
+    if (args.systemFile !== null && args.subcommand !== "llm") {
+      throw new Error("--system-file is only valid with exo llm");
+    }
+    switch (args.subcommand) {
+      case "send":
+        if (args.positionals.length > 0) {
+          throw new Error("send message must be provided via stdin; inline message is not accepted");
+        }
+        primaryPayload = await readExactStdin("send message");
+        break;
+      case "llm":
+        if (args.positionals.length > 0) {
+          throw new Error("llm prompt must be provided via stdin; inline prompt is not accepted");
+        }
+        primaryPayload = await readExactStdin("llm prompt");
+        if (args.systemFile !== null) {
+          if (args.systemFile === "-") {
+            throw new Error("--system-file cannot be '-'; stdin is reserved for the primary llm prompt");
+          }
+          systemPrompt = await readExactUtf8File(args.systemFile, "llm system prompt");
+        }
+        break;
+      case "queue":
+        if (!args.positionals[0]) {
+          process.stderr.write(`Usage: exo queue <convId> [--end]
+Run 'exo queue --help' for details.
+`);
+          return 1;
+        }
+        if (args.positionals.length > 1) {
+          throw new Error("queue message must be provided via stdin; inline message is not accepted");
+        }
+        primaryPayload = await readExactStdin("queue message");
+        break;
+    }
+  } catch (error) {
+    process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}
+`);
+    return 2;
   }
   if (args.instance) {
     setWorktreeOverride(args.instance);
@@ -1728,14 +1841,7 @@ Run 'exo rename --help' for details.
         return await rename(conn, convId, title);
       }
       case "llm": {
-        const text = args.positionals[0] === "-" ? await readStdin() : args.positionals.join(" ");
-        if (!text) {
-          process.stderr.write(`Usage: exo llm "text" --system "prompt"
-Run 'exo llm --help' for details.
-`);
-          return 1;
-        }
-        return await llm(conn, text, args.system, args.provider, args.model, opts);
+        return await llm(conn, primaryPayload, systemPrompt, args.provider, args.model, opts);
       }
       case "transcribe": {
         const path = args.positionals[0];
@@ -1749,30 +1855,11 @@ Run 'exo transcribe --help' for details.
       }
       case "queue": {
         const convId = args.positionals[0];
-        const text = args.positionals.slice(1).join(" ");
-        if (!convId || !text) {
-          process.stderr.write(`Usage: exo queue <convId> "message" [--end]
-Run 'exo queue --help' for details.
-`);
-          return 1;
-        }
         const timing = args.endTiming ? "message-end" : "next-turn";
-        return await queue(conn, convId, text, timing);
+        return await queue(conn, convId, primaryPayload, timing);
       }
       case "send": {
-        let text;
-        if (args.positionals.length === 1 && args.positionals[0] === "-") {
-          text = await readStdin();
-        } else {
-          text = args.positionals.join(" ");
-        }
-        if (!text) {
-          process.stderr.write(`Usage: exo send "message"
-Run 'exo send --help' for details.
-`);
-          return 1;
-        }
-        return await send(conn, text, args.conv, args.provider, args.model, opts);
+        return await send(conn, primaryPayload, args.conv, args.provider, args.model, opts);
       }
       default: {
         process.stderr.write(`Unknown command: ${args.subcommand}

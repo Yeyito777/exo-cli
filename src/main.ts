@@ -9,15 +9,15 @@
  * The daemon holds all state; conversation IDs are the handles.
  *
  * Usage:
- *   exo send "message"              Send a message (new conversation)
- *   exo send "follow up" -c <id>    Continue a conversation
+ *   printf '%s' "message" | exo send              Send a message (new conversation)
+ *   printf '%s' "follow up" | exo send -c <id>    Continue a conversation
  *   exo list                        List conversations
  *   exo info <id>                   Show conversation metadata
  *   exo history <id>                Show conversation history
  *   exo delete <id>                 Delete a conversation
  *   exo abort <id>                  Abort in-flight stream
  *   exo rename <id> <title>         Rename a conversation
- *   exo llm "text" --system "..."   One-shot LLM completion
+ *   printf '%s' "text" | exo llm     One-shot LLM completion
  *   exo transcribe file.wav          Transcribe audio through the daemon
  *   exo status                      Check daemon health
  *
@@ -30,7 +30,7 @@
  *   --stream                        Stream events as NDJSON
  *   --id                            Print only conversation ID
  *   --timeout <sec>                 Max wait time (default 300)
- *   --system <prompt>               System prompt (for llm command)
+ *   --system-file <path>            System prompt file (for llm command)
  *   --detach, --background          Start exo send and return immediately
  *   --foreground                    Disable parent-agent auto-detach for send
  *   --notify-parent <id>            Notify a parent conversation on send completion
@@ -41,6 +41,7 @@ import { Connection } from "./conn";
 import { send, list, jobs, folderList, folderTree, folderMkdir, folderMove, folderRemove, info, history, deleteConversation, abort, queue, rename, llm, transcribeAudio, status, type OutputOptions } from "./commands";
 import { printHelp, printCommandHelp, hasCommandHelp } from "./help";
 import { inferProviderForModel, isProviderId, normalizeModelForProvider, parseModelSpecifier } from "./model-spec";
+import { DEFAULT_SYSTEM_PROMPT, readExactStdin, readExactUtf8File } from "./payload";
 import { setRepoRootOverride, setWorktreeOverride, sourceRepoRoot, worktreeName } from "./shared/paths";
 import type { ModelId, ProviderId } from "./shared/protocol";
 
@@ -76,7 +77,7 @@ interface ParsedArgs {
   conv: string | null;
   provider: ProviderId | null;
   model: ModelId | null;
-  system: string;
+  systemFile: string | null;
   mimeType: string | null;
   instance: string | null;
   json: boolean;
@@ -91,6 +92,8 @@ interface ParsedArgs {
   notifyParent: string | null;
   noNotify: boolean;
   parseError: string | null;
+  parseErrorCode: number;
+  parseErrorShowsHelp: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -100,7 +103,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     conv: null,
     provider: null,
     model: null,
-    system: "You are a helpful assistant.",
+    systemFile: null,
     mimeType: null,
     instance: null,
     json: false,
@@ -115,6 +118,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     notifyParent: null,
     noNotify: false,
     parseError: null,
+    parseErrorCode: 1,
+    parseErrorShowsHelp: true,
   };
 
   let i = 0;
@@ -175,8 +180,34 @@ function parseArgs(argv: string[]): ParsedArgs {
     if ((arg === "-c" || arg === "--conv") && i + 1 < argv.length) {
       result.conv = argv[++i]; i++; continue;
     }
-    if (arg === "--system" && i + 1 < argv.length) {
-      result.system = argv[++i]; i++; continue;
+    if (arg === "--system" || arg.startsWith("--system=")) {
+      result.parseError = "--system is not accepted; use --system-file <path>";
+      result.parseErrorCode = 2;
+      result.parseErrorShowsHelp = false;
+      return result;
+    }
+    if (arg === "--system-file") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--system-file requires a path";
+        return result;
+      }
+      if (result.systemFile !== null) {
+        result.parseError = "--system-file may only be provided once";
+        return result;
+      }
+      result.systemFile = argv[++i]; i++; continue;
+    }
+    if (arg.startsWith("--system-file=")) {
+      if (result.systemFile !== null) {
+        result.parseError = "--system-file may only be provided once";
+        return result;
+      }
+      result.systemFile = arg.slice("--system-file=".length);
+      if (!result.systemFile) {
+        result.parseError = "--system-file requires a path";
+        return result;
+      }
+      i++; continue;
     }
     if (arg === "--mime-type" && i + 1 < argv.length) {
       result.mimeType = argv[++i]; i++; continue;
@@ -220,16 +251,6 @@ function parseArgs(argv: string[]): ParsedArgs {
   return result;
 }
 
-// ── Stdin reading ───────────────────────────────────────────────────
-
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString("utf-8").trim();
-}
-
 // ── Main ────────────────────────────────────────────────────────────
 
 async function main(): Promise<number> {
@@ -257,9 +278,12 @@ async function main(): Promise<number> {
   }
 
   if (args.parseError) {
-    process.stderr.write(`Error: ${args.parseError}\n\n`);
-    printHelp();
-    return 1;
+    process.stderr.write(`Error: ${args.parseError}\n`);
+    if (args.parseErrorShowsHelp) {
+      process.stderr.write("\n");
+      printHelp();
+    }
+    return args.parseErrorCode;
   }
 
   // No args at all → show help
@@ -273,6 +297,47 @@ async function main(): Promise<number> {
     process.stderr.write(`Unknown command: ${args.positionals[0]}\n\n`);
     printHelp();
     return 1;
+  }
+
+  let primaryPayload: string | null = null;
+  let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+  try {
+    if (args.systemFile !== null && args.subcommand !== "llm") {
+      throw new Error("--system-file is only valid with exo llm");
+    }
+    switch (args.subcommand) {
+      case "send":
+        if (args.positionals.length > 0) {
+          throw new Error("send message must be provided via stdin; inline message is not accepted");
+        }
+        primaryPayload = await readExactStdin("send message");
+        break;
+      case "llm":
+        if (args.positionals.length > 0) {
+          throw new Error("llm prompt must be provided via stdin; inline prompt is not accepted");
+        }
+        primaryPayload = await readExactStdin("llm prompt");
+        if (args.systemFile !== null) {
+          if (args.systemFile === "-") {
+            throw new Error("--system-file cannot be '-'; stdin is reserved for the primary llm prompt");
+          }
+          systemPrompt = await readExactUtf8File(args.systemFile, "llm system prompt");
+        }
+        break;
+      case "queue":
+        if (!args.positionals[0]) {
+          process.stderr.write("Usage: exo queue <convId> [--end]\nRun 'exo queue --help' for details.\n");
+          return 1;
+        }
+        if (args.positionals.length > 1) {
+          throw new Error("queue message must be provided via stdin; inline message is not accepted");
+        }
+        primaryPayload = await readExactStdin("queue message");
+        break;
+    }
+  } catch (error) {
+    process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 2;
   }
 
   if (args.instance) {
@@ -385,11 +450,7 @@ async function main(): Promise<number> {
       }
 
       case "llm": {
-        const text = args.positionals[0] === "-"
-          ? await readStdin()
-          : args.positionals.join(" ");
-        if (!text) { process.stderr.write("Usage: exo llm \"text\" --system \"prompt\"\nRun 'exo llm --help' for details.\n"); return 1; }
-        return await llm(conn, text, args.system, args.provider, args.model, opts);
+        return await llm(conn, primaryPayload!, systemPrompt, args.provider, args.model, opts);
       }
 
       case "transcribe": {
@@ -400,21 +461,12 @@ async function main(): Promise<number> {
 
       case "queue": {
         const convId = args.positionals[0];
-        const text = args.positionals.slice(1).join(" ");
-        if (!convId || !text) { process.stderr.write("Usage: exo queue <convId> \"message\" [--end]\nRun 'exo queue --help' for details.\n"); return 1; }
         const timing = args.endTiming ? "message-end" as const : "next-turn" as const;
-        return await queue(conn, convId, text, timing);
+        return await queue(conn, convId, primaryPayload!, timing);
       }
 
       case "send": {
-        let text: string;
-        if (args.positionals.length === 1 && args.positionals[0] === "-") {
-          text = await readStdin();
-        } else {
-          text = args.positionals.join(" ");
-        }
-        if (!text) { process.stderr.write("Usage: exo send \"message\"\nRun 'exo send --help' for details.\n"); return 1; }
-        return await send(conn, text, args.conv, args.provider, args.model, opts);
+        return await send(conn, primaryPayload!, args.conv, args.provider, args.model, opts);
       }
 
       default: {
