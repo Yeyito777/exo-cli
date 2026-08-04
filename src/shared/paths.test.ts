@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { dataDir, repoRoot, runtimeDir, setRepoRootOverride, setWorktreeOverride, sourceRepoRoot, worktreeName } from "./paths";
+import { join } from "path";
+import {
+  dataDir,
+  repoRoot,
+  runtimeDir,
+  setRepoRootOverride,
+  setWorktreeOverride,
+  socketPath,
+  sourceRepoRoot,
+  worktreeName,
+} from "./paths";
 
 describe("path targeting", () => {
   beforeEach(() => {
@@ -10,23 +20,25 @@ describe("path targeting", () => {
   test("defaults to the main source checkout with no worktree instance", () => {
     expect(worktreeName()).toBe(null);
     expect(repoRoot()).toBe(sourceRepoRoot());
-    expect(dataDir()).toBe(`${sourceRepoRoot()}/config/data`);
-    expect(runtimeDir()).toBe(`${sourceRepoRoot()}/config/runtime`);
+    expect(dataDir()).toBe(join(sourceRepoRoot(), "config", "data"));
+    expect(runtimeDir()).toBe(join(sourceRepoRoot(), "config", "runtime"));
+    expect(socketPath("win32")).toBe("\\\\.\\pipe\\exocortexd");
   });
 
   test("uses explicit override for namespaced paths", () => {
     setWorktreeOverride("browse-links");
-    setRepoRootOverride(`${sourceRepoRoot()}/.worktrees/browse-links`);
+    setRepoRootOverride(join(sourceRepoRoot(), ".worktrees", "browse-links"));
 
     expect(worktreeName()).toBe("browse-links");
-    expect(repoRoot()).toContain("/.worktrees/browse-links");
-    expect(dataDir()).toContain("/.worktrees/browse-links/config/data/instances/browse-links");
-    expect(runtimeDir()).toContain("/.worktrees/browse-links/config/runtime/browse-links");
+    expect(repoRoot()).toBe(join(sourceRepoRoot(), ".worktrees", "browse-links"));
+    expect(dataDir()).toBe(join(repoRoot(), "config", "data", "instances", "browse-links"));
+    expect(runtimeDir()).toBe(join(repoRoot(), "config", "runtime", "browse-links"));
+    expect(socketPath("win32")).toBe("\\\\.\\pipe\\exocortexd-browse-links");
   });
 
   test("clearing override restores the main source checkout", () => {
     setWorktreeOverride("browse-links");
-    setRepoRootOverride(`${sourceRepoRoot()}/.worktrees/browse-links`);
+    setRepoRootOverride(join(sourceRepoRoot(), ".worktrees", "browse-links"));
     setWorktreeOverride(null);
     setRepoRootOverride(null);
 

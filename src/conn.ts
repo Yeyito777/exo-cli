@@ -21,7 +21,9 @@ export class Connection {
   async connect(): Promise<void> {
     const path = socketPath();
     const instance = worktreeName();
-    if (!existsSync(path)) {
+    // Windows named pipes are kernel objects and never appear in the filesystem.
+    // Let connect() report an absent pipe instead of rejecting every valid pipe.
+    if (process.platform !== "win32" && !existsSync(path)) {
       const target = instance ? ` for instance '${instance}'` : "";
       throw new Error(
         `exocortexd socket${target} not found. Is the daemon running?\n` +

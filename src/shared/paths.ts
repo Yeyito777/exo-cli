@@ -18,13 +18,23 @@
  * still shared across instances.
  */
 
-import { join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 
 // ── Repo root ───────────────────────────────────────────────────────
 // This file lives at <repo>/external-tools/exo-cli/src/shared/paths.ts
 // — four levels up is the source repo root.
 
-const SOURCE_REPO_ROOT = resolve(import.meta.dir, "../../../..");
+function detectSourceRepoRoot(): string {
+  // A compiled Windows exo.exe is installed beside exocortexd.exe and shares
+  // that daemon's config root. Under source execution, process.execPath is
+  // bun.exe and import.meta.dir points into the checkout.
+  if (process.platform === "win32" && !/^bun(?:\.exe)?$/i.test(basename(process.execPath))) {
+    return dirname(process.execPath);
+  }
+  return resolve(import.meta.dir, "../../../..");
+}
+
+const SOURCE_REPO_ROOT = detectSourceRepoRoot();
 
 // ── Explicit overrides ───────────────────────────────────────────────
 
@@ -86,8 +96,12 @@ export function runtimeDir(): string {
     : join(configDir(), "runtime");
 }
 
-/** Full path to the daemon socket. */
-export function socketPath(): string {
+/** Full path to the daemon socket or Windows named pipe. */
+export function socketPath(platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") {
+    const wt = effectiveWorktreeName();
+    return wt ? `\\\\.\\pipe\\exocortexd-${wt}` : "\\\\.\\pipe\\exocortexd";
+  }
   return join(runtimeDir(), "exocortexd.sock");
 }
 
