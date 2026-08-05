@@ -61,7 +61,26 @@ describe("opaque payload CLI contract", () => {
     const llm = run(["llm", "-h"]);
     expect(top.stdout).toContain("read their exact UTF-8 message/prompt from stdin");
     expect(send.stdout).toContain("Inline message arguments are not accepted");
+    expect(send.stdout).toContain("--custom-tool");
+    expect(send.stdout).toContain("--internal-tool");
+    expect(send.stdout).toContain("--folder");
+    expect(send.stdout).toContain("--auto-title");
     expect(queue.stdout).toContain("exact UTF-8 message from stdin");
     expect(llm.stdout).toContain("--system-file");
+  });
+
+  test("validates new-conversation tool flags before connecting", () => {
+    for (const [args, message] of [
+      [["send", "--custom-tool"], "--custom-tool requires a module path"],
+      [["send", "--internal-tool"], "--internal-tool requires a tool name"],
+      [["send", "--external-tool"], "--external-tool requires a tool name"],
+      [["send", "--folder"], "--folder requires a sidebar folder path"],
+      [["send", "-c", "123-aabbcc", "--auto-title"], "only valid when creating a new conversation"],
+    ] as const) {
+      const result = run([...args], "request");
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(message);
+      expect(result.stderr).not.toContain("socket");
+    }
   });
 });

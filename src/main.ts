@@ -91,6 +91,11 @@ interface ParsedArgs {
   foreground: boolean;
   notifyParent: string | null;
   noNotify: boolean;
+  customToolModules: string[];
+  internalTools: string[] | null;
+  externalTools: string[] | null;
+  folderPath: string | null;
+  autoTitle: boolean;
   parseError: string | null;
   parseErrorCode: number;
   parseErrorShowsHelp: boolean;
@@ -117,6 +122,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     foreground: false,
     notifyParent: null,
     noNotify: false,
+    customToolModules: [],
+    internalTools: null,
+    externalTools: null,
+    folderPath: null,
+    autoTitle: false,
     parseError: null,
     parseErrorCode: 1,
     parseErrorShowsHelp: true,
@@ -219,6 +229,49 @@ function parseArgs(argv: string[]): ParsedArgs {
     if (arg === "--detach" || arg === "--background") { result.detach = true; i++; continue; }
     if (arg === "--foreground") { result.foreground = true; i++; continue; }
     if (arg === "--no-notify") { result.noNotify = true; i++; continue; }
+    if (arg === "--custom-tool") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--custom-tool requires a module path";
+        return result;
+      }
+      result.customToolModules.push(argv[++i]);
+      i++;
+      continue;
+    }
+    if (arg === "--internal-tool") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--internal-tool requires a tool name";
+        return result;
+      }
+      if (result.internalTools === null) result.internalTools = [];
+      result.internalTools.push(argv[++i]);
+      i++;
+      continue;
+    }
+    if (arg === "--external-tool") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--external-tool requires a tool name";
+        return result;
+      }
+      if (result.externalTools === null) result.externalTools = [];
+      result.externalTools.push(argv[++i]);
+      i++;
+      continue;
+    }
+    if (arg === "--folder") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--folder requires a sidebar folder path";
+        return result;
+      }
+      if (result.folderPath !== null) {
+        result.parseError = "--folder may only be provided once";
+        return result;
+      }
+      result.folderPath = argv[++i];
+      i++;
+      continue;
+    }
+    if (arg === "--auto-title") { result.autoTitle = true; i++; continue; }
     if (arg === "--notify-parent") {
       if (i + 1 >= argv.length) {
         result.parseError = "--notify-parent requires a conversation ID";
@@ -246,6 +299,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       result.positionals.shift();
       result.subcommand = ALIASES[first];
     }
+  }
+
+  if (result.conv && (result.customToolModules.length > 0 || result.internalTools !== null || result.externalTools !== null || result.folderPath || result.autoTitle)) {
+    result.parseError = "--custom-tool, tool selection, --folder, and --auto-title are only valid when creating a new conversation";
   }
 
   return result;
@@ -358,6 +415,11 @@ async function main(): Promise<number> {
     detached: args.detach || autoDetachSend,
     notifyParent: args.noNotify ? null : (args.notifyParent ?? parentConvId),
     subagentFolder: spawnedByAgent,
+    customToolModules: args.customToolModules,
+    internalTools: args.internalTools ?? undefined,
+    externalTools: args.externalTools ?? undefined,
+    folderPath: args.folderPath,
+    autoTitle: args.autoTitle,
   };
 
   const conn = new Connection();

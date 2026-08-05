@@ -3,8 +3,9 @@
  * and options, does its work, and returns an exit code.
  */
 
-import { readFile } from "node:fs/promises";
-import { extname } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { extname, resolve } from "node:path";
 import type { Connection } from "./conn";
 import type {
   ProviderId,
@@ -23,6 +24,9 @@ import type {
   ConversationSummary,
   FolderSummary,
   SidebarItemRef,
+  ToolPolicyEvent,
+  ToolPolicyMutation,
+  ToolPolicySnapshot,
 } from "./shared/protocol";
 import { inferProviderForModel } from "./model-spec";
 import { collectResponse, type StreamCallback } from "./collect";
@@ -37,6 +41,11 @@ export interface OutputOptions {
   detached?: boolean;
   notifyParent?: string | null;
   subagentFolder?: boolean;
+  customToolModules?: string[];
+  internalTools?: string[];
+  externalTools?: string[];
+  folderPath?: string | null;
+  autoTitle?: boolean;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -56,6 +65,26 @@ function autoTitle(text: string): string {
   // CLI-originated conversations are easy to distinguish from human ones.
   const firstLine = text.split("\n")[0].trim();
   return "cli: " + truncate(firstLine, 75);
+}
+
+function clientConversationId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8).padEnd(6, "0")}`;
+}
+
+const CUSTOM_TOOL_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs"]);
+
+async function canonicalCustomToolModulePath(input: string): Promise<string> {
+  const expanded = input === "~" ? homedir() : input.startsWith("~/") ? resolve(homedir(), input.slice(2)) : resolve(input);
+  const canonical = await realpath(expanded).catch((error: any) => {
+    if (error?.code === "ENOENT") throw new Error(`Custom tool module not found: ${expanded}`);
+    throw error;
+  });
+  const details = await stat(canonical);
+  if (!details.isFile()) throw new Error(`Custom tool module is not a file: ${canonical}`);
+  if (!CUSTOM_TOOL_EXTENSIONS.has(extname(canonical).toLowerCase())) {
+    throw new Error(`Unsupported custom tool module extension: ${canonical}`);
+  }
+  return canonical;
 }
 
 async function fetchSidebarState(conn: Connection): Promise<{ conversations: ConversationSummary[]; folders: FolderSummary[] }> {
@@ -261,6 +290,86 @@ function makeLiveStreamCallback(targetConvId: string, full: boolean): StreamCall
   };
 }
 
+async function draftToolPolicy(
+  conn: Connection,
+  draftId: string,
+  mutation?: ToolPolicyMutation,
+): Promise<ToolPolicySnapshot> {
+  const reqId = nextReqId();
+  const command = mutation
+    ? { type: "set_draft_tool_policy" as const, reqId, draftId, mutation }
+    : { type: "get_draft_tool_policy" as const, reqId, draftId };
+  const event = await conn.request<ToolPolicyEvent>(
+    command,
+    (candidate): candidate is ToolPolicyEvent => candidate.type === "tool_policy" && candidate.reqId === reqId,
+  );
+  return event.snapshot;
+}
+
+async function clearDraftToolPolicy(conn: Connection, draftId: string): Promise<void> {
+  const reqId = nextReqId();
+  await conn.request<AckEvent>(
+    { type: "clear_draft_tool_policy", reqId, draftId },
+    (event): event is AckEvent => event.type === "ack" && event.reqId === reqId,
+  );
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+/** Install modules and exact allowlists on a not-yet-created conversation. */
+export async function configureDraftToolPolicy(
+  conn: Connection,
+  draftId: string,
+  options: Pick<OutputOptions, "customToolModules" | "internalTools" | "externalTools">,
+): Promise<ToolPolicySnapshot | null> {
+  const moduleInputs = unique(options.customToolModules ?? []);
+  const hasExactInternal = options.internalTools !== undefined;
+  // An explicit internal allowlist starts a fully scoped policy; callers that
+  // want external tools must opt into them explicitly as well.
+  const hasExactExternal = options.externalTools !== undefined || hasExactInternal;
+  if (moduleInputs.length === 0 && !hasExactInternal && !hasExactExternal) return null;
+
+  const modulePaths = await Promise.all(moduleInputs.map(canonicalCustomToolModulePath));
+  let snapshot = modulePaths.length > 0
+    ? await draftToolPolicy(conn, draftId, { action: "enable", tools: [], modulePaths })
+    : await draftToolPolicy(conn, draftId);
+
+  const availableInternal = new Set(snapshot.internal.map((tool) => tool.name));
+  const availableExternal = new Set(snapshot.external.map((tool) => tool.name));
+  const desiredInternal = new Set(hasExactInternal
+    ? unique(options.internalTools ?? [])
+    : snapshot.internal.filter((tool) => tool.enabled).map((tool) => tool.name));
+  const desiredExternal = new Set(hasExactExternal
+    ? unique(options.externalTools ?? [])
+    : snapshot.external.filter((tool) => tool.enabled).map((tool) => tool.name));
+
+  const unknownInternal = [...desiredInternal].filter((name) => !availableInternal.has(name));
+  const unknownExternal = [...desiredExternal].filter((name) => !availableExternal.has(name));
+  if (unknownInternal.length) throw new Error(`Unknown or unavailable internal tool${unknownInternal.length === 1 ? "" : "s"}: ${unknownInternal.join(", ")}`);
+  if (unknownExternal.length) throw new Error(`Unknown or unavailable external tool${unknownExternal.length === 1 ? "" : "s"}: ${unknownExternal.join(", ")}`);
+  if (desiredExternal.size > 0 && availableInternal.has("bash")) desiredInternal.add("bash");
+
+  const enable = [
+    ...snapshot.internal.filter((tool) => desiredInternal.has(tool.name) && !tool.enabled).map((tool) => ({ kind: "internal" as const, name: tool.name })),
+    ...snapshot.external.filter((tool) => desiredExternal.has(tool.name) && !tool.enabled).map((tool) => ({ kind: "external" as const, name: tool.name })),
+  ];
+  if (enable.length) snapshot = await draftToolPolicy(conn, draftId, { action: "enable", tools: enable });
+
+  const disableExternal = snapshot.external
+    .filter((tool) => tool.enabled && !desiredExternal.has(tool.name))
+    .map((tool) => ({ kind: "external" as const, name: tool.name }));
+  if (disableExternal.length) snapshot = await draftToolPolicy(conn, draftId, { action: "disable", tools: disableExternal });
+
+  const disableInternal = snapshot.internal
+    .filter((tool) => tool.enabled && !desiredInternal.has(tool.name))
+    .map((tool) => ({ kind: "internal" as const, name: tool.name }));
+  if (disableInternal.length) snapshot = await draftToolPolicy(conn, draftId, { action: "disable", tools: disableInternal });
+
+  return snapshot;
+}
+
 export async function send(
   conn: Connection,
   text: string,
@@ -270,23 +379,42 @@ export async function send(
   opts: OutputOptions,
 ): Promise<number> {
   const resolvedProvider = provider ?? inferProviderForModel(model);
+  let configuredPolicy: ToolPolicySnapshot | null = null;
+  let createdFolderPath: string | null = null;
 
   // Create conversation if needed
   if (!convId) {
+    const draftId = clientConversationId();
+    const draftRequested = (opts.customToolModules?.length ?? 0) > 0
+      || opts.internalTools !== undefined
+      || opts.externalTools !== undefined;
+    let draftConfigured = false;
     const reqId = nextReqId();
-    const title = autoTitle(text);
-    const created = await conn.request<ConversationCreatedEvent>(
-      {
-        type: "new_conversation",
-        reqId,
-        provider: resolvedProvider ?? undefined,
-        model: model ?? undefined,
-        title,
-        subagent: opts.subagentFolder === true,
-      },
-      (e): e is ConversationCreatedEvent => e.type === "conversation_created" && e.reqId === reqId,
-    );
-    convId = created.convId;
+    try {
+      configuredPolicy = await configureDraftToolPolicy(conn, draftId, opts);
+      draftConfigured = configuredPolicy !== null;
+      const folder = opts.folderPath ? await ensureFolderPath(conn, opts.folderPath) : null;
+      createdFolderPath = folder?.path ?? null;
+      const created = await conn.request<ConversationCreatedEvent>(
+        {
+          type: "new_conversation",
+          reqId,
+          convId: draftConfigured ? draftId : undefined,
+          provider: resolvedProvider ?? undefined,
+          model: model ?? undefined,
+          title: opts.autoTitle ? undefined : autoTitle(text),
+          titleContext: opts.autoTitle ? text : undefined,
+          folderId: folder?.folderId,
+          subagent: opts.subagentFolder === true && !folder,
+          draftToolPolicyId: draftConfigured ? draftId : undefined,
+        },
+        (e): e is ConversationCreatedEvent => e.type === "conversation_created" && e.reqId === reqId,
+      );
+      convId = created.convId;
+    } catch (error) {
+      if (draftRequested) await clearDraftToolPolicy(conn, draftId).catch(() => {});
+      throw error;
+    }
   } else if (model) {
     // Switch model on existing conversation
     conn.send({ type: "set_model", convId, provider: resolvedProvider ?? undefined, model });
@@ -312,7 +440,13 @@ export async function send(
     if (opts.idOnly) {
       process.stdout.write(convId + "\n");
     } else if (opts.json) {
-      process.stdout.write(JSON.stringify({ convId, detached: true, notifyParent: notifyParent?.convId ?? null }) + "\n");
+      process.stdout.write(JSON.stringify({
+        convId,
+        detached: true,
+        notifyParent: notifyParent?.convId ?? null,
+        folder: createdFolderPath,
+        toolPolicy: configuredPolicy,
+      }) + "\n");
     } else {
       const notifyText = notifyParent
         ? ` Parent will be notified when it completes.`
@@ -509,9 +643,12 @@ async function createFolderAndRefresh(conn: Connection, name: string, parentId: 
   return await fetchSidebarState(conn);
 }
 
-export async function folderMkdir(conn: Connection, path: string, opts: OutputOptions): Promise<number> {
+export async function ensureFolderPath(
+  conn: Connection,
+  path: string,
+): Promise<{ path: string; folderId: string; created: Array<{ name: string; path: string; parentId: string | null }> }> {
   const normalized = normalizeFolderPath(path);
-  if (normalized === "/") throw new Error("Cannot create root folder");
+  if (normalized === "/") throw new Error("Root is not a conversation folder");
   const parts = normalized.split("/").filter(Boolean);
   let state = await fetchSidebarState(conn);
   let parentId: string | null = null;
@@ -531,6 +668,12 @@ export async function folderMkdir(conn: Connection, path: string, opts: OutputOp
     created.push({ name: part, path: currentPath, parentId });
     parentId = made.id;
   }
+  if (!parentId) throw new Error(`Could not resolve folder: ${normalized}`);
+  return { path: normalized, folderId: parentId, created };
+}
+
+export async function folderMkdir(conn: Connection, path: string, opts: OutputOptions): Promise<number> {
+  const { path: normalized, created } = await ensureFolderPath(conn, path);
 
   if (opts.json) {
     process.stdout.write(JSON.stringify({ path: normalized, created }) + "\n");

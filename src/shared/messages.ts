@@ -205,6 +205,48 @@ export interface ToolDisplayInfo {
   color: string;    // hex color "#d19a66"
 }
 
+// ── Per-conversation tool policy ───────────────────────────────────
+
+export type ToolPolicyKind = "internal" | "external";
+
+export interface ToolPolicyRef {
+  kind: ToolPolicyKind;
+  name: string;
+}
+
+export type ToolPolicyMutation =
+  | {
+      action: "enable" | "disable";
+      tools: ToolPolicyRef[];
+      /** TypeScript/JavaScript tool modules to attach or detach. */
+      modulePaths?: string[];
+    }
+  | { action: "reset" };
+
+export interface ToolPolicyAvailability {
+  name: string;
+  label: string;
+  enabled: boolean;
+  color?: string;
+  modulePath?: string;
+}
+
+export interface ToolPolicyModuleAvailability {
+  path: string;
+  digest: string;
+  tools: string[];
+}
+
+export interface ToolPolicySnapshot {
+  convId: string;
+  scoped: boolean;
+  source: "default" | "explicit";
+  internal: ToolPolicyAvailability[];
+  external: ToolPolicyAvailability[];
+  modules?: ToolPolicyModuleAvailability[];
+  shellWarning: boolean;
+}
+
 /**
  * External tool style — maps a bash sub-command prefix to TUI display
  * properties. Sent alongside ToolDisplayInfo so the TUI can style

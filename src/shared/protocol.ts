@@ -8,8 +8,8 @@
  * Commands flow client → daemon. Events flow daemon → client.
  */
 
-import type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, FolderSummary, SidebarItemRef, ToolDisplayInfo, ExternalToolStyle, ImageAttachment } from "./messages";
-export type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, FolderSummary, SidebarItemRef, ToolDisplayInfo, ExternalToolStyle, ImageAttachment };
+import type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, FolderSummary, SidebarItemRef, ToolDisplayInfo, ExternalToolStyle, ImageAttachment, ToolPolicyMutation, ToolPolicySnapshot } from "./messages";
+export type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, FolderSummary, SidebarItemRef, ToolDisplayInfo, ExternalToolStyle, ImageAttachment, ToolPolicyMutation, ToolPolicySnapshot };
 
 // ── Commands (client → daemon) ──────────────────────────────────────
 
@@ -21,15 +21,21 @@ export interface PingCommand {
 export interface NewConversationCommand {
   type: "new_conversation";
   reqId?: string;
+  /** Client-generated id required when consuming a draft tool policy. */
+  convId?: string;
   provider?: ProviderId;
   model?: ModelId;
   effort?: EffortLevel;
   /** Initial title. Clients that don't set this get an empty title. */
   title?: string;
+  /** Prompt text used by the daemon-owned title generation job. */
+  titleContext?: string;
   /** Folder to create the conversation in. Null/omitted means the sidebar root. */
   folderId?: string | null;
   /** If true, the daemon creates/reuses the top-level "subagents" folder for this conversation. */
   subagent?: boolean;
+  /** Ephemeral draft whose tool policy is consumed atomically at creation. */
+  draftToolPolicyId?: string;
 }
 
 export interface ParentNotificationTarget {
@@ -217,6 +223,38 @@ export interface GetSystemPromptCommand {
   reqId?: string;
 }
 
+export interface GetToolPolicyCommand {
+  type: "get_tool_policy";
+  reqId?: string;
+  convId: string;
+}
+
+export interface SetToolPolicyCommand {
+  type: "set_tool_policy";
+  reqId?: string;
+  convId: string;
+  mutation: ToolPolicyMutation;
+}
+
+export interface GetDraftToolPolicyCommand {
+  type: "get_draft_tool_policy";
+  reqId?: string;
+  draftId: string;
+}
+
+export interface SetDraftToolPolicyCommand {
+  type: "set_draft_tool_policy";
+  reqId?: string;
+  draftId: string;
+  mutation: ToolPolicyMutation;
+}
+
+export interface ClearDraftToolPolicyCommand {
+  type: "clear_draft_tool_policy";
+  reqId?: string;
+  draftId: string;
+}
+
 export interface TranscribeAudioCommand {
   type: "transcribe_audio";
   reqId?: string;
@@ -262,6 +300,11 @@ export type Command =
   | UnwindConversationCommand
   | LlmCompleteCommand
   | GetSystemPromptCommand
+  | GetToolPolicyCommand
+  | SetToolPolicyCommand
+  | GetDraftToolPolicyCommand
+  | SetDraftToolPolicyCommand
+  | ClearDraftToolPolicyCommand
   | TranscribeAudioCommand
   | LoginCommand
   | LogoutCommand;
@@ -488,6 +531,14 @@ export interface SystemPromptEvent {
   systemPrompt: string;
 }
 
+export interface ToolPolicyEvent {
+  type: "tool_policy";
+  reqId?: string;
+  convId: string;
+  snapshot: ToolPolicySnapshot;
+  changed: boolean;
+}
+
 export interface TranscriptionResultEvent {
   type: "transcription_result";
   reqId?: string;
@@ -539,6 +590,7 @@ export type Event =
   | HistoryUpdatedEvent
   | LlmCompleteResultEvent
   | SystemPromptEvent
+  | ToolPolicyEvent
   | TranscriptionResultEvent
   | AuthStatusEvent
   | ErrorEvent;

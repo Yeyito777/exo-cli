@@ -81,6 +81,11 @@ ${MODEL_FLAG_SUMMARY}
   --foreground                      Disable parent-agent auto-detach for send
   --notify-parent <id>              Notify a parent conversation on send completion
   --no-notify                       Detach send without parent notification
+  --custom-tool <path>              Attach a trusted TS/JS internal-tool module (repeatable)
+  --internal-tool <name>            Exact internal-tool selection for a new conversation (repeatable)
+  --external-tool <name>            Exact external-tool selection for a new conversation (repeatable)
+  --folder <path>                    Create the conversation in this sidebar folder, creating it if needed
+  --auto-title                       Let the daemon title-generation job name the conversation
 
 ${b("SUBAGENTS")}
   \`exo send\` starts or continues persisted conversation subagents. From inside
@@ -126,6 +131,19 @@ ${MODEL_FLAG_SUMMARY_SEND}
   --foreground                      Disable parent-agent auto-detach
   --notify-parent <id>              Notify a parent conversation on completion
   --no-notify                       Detach without parent notification
+  --custom-tool <path>              Attach a trusted TS/JS internal-tool module; repeat to attach several
+  --internal-tool <name>            Select exactly these internal tools; repeat for each tool
+  --external-tool <name>            Select exactly these external tools; repeat for each tool
+  --folder <path>                    Place the new conversation in a nested sidebar folder
+  --auto-title                       Use daemon-owned title generation instead of a \`cli:\` title
+
+${b("CUSTOM INTERNAL TOOLS")}
+  Custom modules are loaded into an ephemeral draft policy before the
+  conversation is created, so their tools are available during its first turn.
+  Module paths are canonicalized locally and must name trusted TS/JS files.
+
+  cat prompt.txt | exo send --custom-tool ~/tools/assets.ts \
+    --internal-tool read --internal-tool asset_grep --auto-title
 
 ${b("SUBAGENT BEHAVIOR")}
   When exo send is called from inside an Exocortex parent conversation, it
