@@ -46,6 +46,7 @@ export interface OutputOptions {
   externalTools?: string[];
   folderPath?: string | null;
   autoTitle?: boolean;
+  newConversationId?: string | null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -384,7 +385,7 @@ export async function send(
 
   // Create conversation if needed
   if (!convId) {
-    const draftId = clientConversationId();
+    const draftId = opts.newConversationId ?? clientConversationId();
     const draftRequested = (opts.customToolModules?.length ?? 0) > 0
       || opts.internalTools !== undefined
       || opts.externalTools !== undefined;
@@ -399,7 +400,7 @@ export async function send(
         {
           type: "new_conversation",
           reqId,
-          convId: draftConfigured ? draftId : undefined,
+          convId: draftConfigured || opts.newConversationId ? draftId : undefined,
           provider: resolvedProvider ?? undefined,
           model: model ?? undefined,
           title: opts.autoTitle ? undefined : autoTitle(text),

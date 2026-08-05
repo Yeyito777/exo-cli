@@ -96,6 +96,7 @@ interface ParsedArgs {
   externalTools: string[] | null;
   folderPath: string | null;
   autoTitle: boolean;
+  newConversationId: string | null;
   parseError: string | null;
   parseErrorCode: number;
   parseErrorShowsHelp: boolean;
@@ -127,6 +128,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     externalTools: null,
     folderPath: null,
     autoTitle: false,
+    newConversationId: null,
     parseError: null,
     parseErrorCode: 1,
     parseErrorShowsHelp: true,
@@ -272,6 +274,19 @@ function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
     if (arg === "--auto-title") { result.autoTitle = true; i++; continue; }
+    if (arg === "--new-conversation-id") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--new-conversation-id requires an ID";
+        return result;
+      }
+      result.newConversationId = argv[++i];
+      if (!/^\d{13}-[a-z0-9]{6}$/.test(result.newConversationId)) {
+        result.parseError = "--new-conversation-id must match <13-digit timestamp>-<6 lowercase letters/digits>";
+        return result;
+      }
+      i++;
+      continue;
+    }
     if (arg === "--notify-parent") {
       if (i + 1 >= argv.length) {
         result.parseError = "--notify-parent requires a conversation ID";
@@ -301,8 +316,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
 
-  if (result.conv && (result.customToolModules.length > 0 || result.internalTools !== null || result.externalTools !== null || result.folderPath || result.autoTitle)) {
-    result.parseError = "--custom-tool, tool selection, --folder, and --auto-title are only valid when creating a new conversation";
+  if (result.conv && (result.customToolModules.length > 0 || result.internalTools !== null || result.externalTools !== null || result.folderPath || result.autoTitle || result.newConversationId)) {
+    result.parseError = "--custom-tool, tool selection, --folder, --auto-title, and --new-conversation-id are only valid when creating a new conversation";
   }
 
   return result;
@@ -420,6 +435,7 @@ async function main(): Promise<number> {
     externalTools: args.externalTools ?? undefined,
     folderPath: args.folderPath,
     autoTitle: args.autoTitle,
+    newConversationId: args.newConversationId,
   };
 
   const conn = new Connection();

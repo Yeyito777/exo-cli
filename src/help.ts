@@ -86,6 +86,7 @@ ${MODEL_FLAG_SUMMARY}
   --external-tool <name>            Exact external-tool selection for a new conversation (repeatable)
   --folder <path>                    Create the conversation in this sidebar folder, creating it if needed
   --auto-title                       Let the daemon title-generation job name the conversation
+  --new-conversation-id <id>         Reserve an explicit ID for restart-idempotent creation
 
 ${b("SUBAGENTS")}
   \`exo send\` starts or continues persisted conversation subagents. From inside
@@ -136,6 +137,7 @@ ${MODEL_FLAG_SUMMARY_SEND}
   --external-tool <name>            Select exactly these external tools; repeat for each tool
   --folder <path>                    Place the new conversation in a nested sidebar folder
   --auto-title                       Use daemon-owned title generation instead of a \`cli:\` title
+  --new-conversation-id <id>         Reserve an explicit ID for restart-idempotent creation
 
 ${b("CUSTOM INTERNAL TOOLS")}
   Custom modules are loaded into an ephemeral draft policy before the

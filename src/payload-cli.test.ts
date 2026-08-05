@@ -65,6 +65,7 @@ describe("opaque payload CLI contract", () => {
     expect(send.stdout).toContain("--internal-tool");
     expect(send.stdout).toContain("--folder");
     expect(send.stdout).toContain("--auto-title");
+    expect(send.stdout).toContain("--new-conversation-id");
     expect(queue.stdout).toContain("exact UTF-8 message from stdin");
     expect(llm.stdout).toContain("--system-file");
   });
@@ -75,7 +76,9 @@ describe("opaque payload CLI contract", () => {
       [["send", "--internal-tool"], "--internal-tool requires a tool name"],
       [["send", "--external-tool"], "--external-tool requires a tool name"],
       [["send", "--folder"], "--folder requires a sidebar folder path"],
+      [["send", "--new-conversation-id", "invalid"], "must match <13-digit timestamp>"],
       [["send", "-c", "123-aabbcc", "--auto-title"], "only valid when creating a new conversation"],
+      [["send", "-c", "123-aabbcc", "--new-conversation-id", "1785000000000-aabbcc"], "only valid when creating a new conversation"],
     ] as const) {
       const result = run([...args], "request");
       expect(result.status).toBe(1);
