@@ -10,6 +10,7 @@ import type { Connection } from "./conn";
 import type {
   ProviderId,
   ModelId,
+  EffortLevel,
   QueueTiming,
   Event,
   PongEvent,
@@ -47,6 +48,7 @@ export interface OutputOptions {
   folderPath?: string | null;
   autoTitle?: boolean;
   newConversationId?: string | null;
+  effort?: EffortLevel | null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -403,6 +405,7 @@ export async function send(
           convId: draftConfigured || opts.newConversationId ? draftId : undefined,
           provider: resolvedProvider ?? undefined,
           model: model ?? undefined,
+          effort: opts.effort ?? undefined,
           title: opts.autoTitle ? undefined : autoTitle(text),
           titleContext: opts.autoTitle ? text : undefined,
           folderId: folder?.folderId,
@@ -416,9 +419,14 @@ export async function send(
       if (draftRequested) await clearDraftToolPolicy(conn, draftId).catch(() => {});
       throw error;
     }
-  } else if (model) {
-    // Switch model on existing conversation
-    conn.send({ type: "set_model", convId, provider: resolvedProvider ?? undefined, model });
+  } else {
+    if (model) {
+      // Switch model on an existing conversation before starting its next turn.
+      conn.send({ type: "set_model", convId, provider: resolvedProvider ?? undefined, model });
+    }
+    if (opts.effort) {
+      conn.send({ type: "set_effort", convId, effort: opts.effort });
+    }
   }
 
   if (opts.detached) {

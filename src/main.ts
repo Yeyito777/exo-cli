@@ -43,7 +43,7 @@ import { printHelp, printCommandHelp, hasCommandHelp } from "./help";
 import { inferProviderForModel, isProviderId, normalizeModelForProvider, parseModelSpecifier } from "./model-spec";
 import { DEFAULT_SYSTEM_PROMPT, readExactStdin, readExactUtf8File } from "./payload";
 import { setRepoRootOverride, setWorktreeOverride, sourceRepoRoot, worktreeName } from "./shared/paths";
-import type { ModelId, ProviderId } from "./shared/protocol";
+import type { EffortLevel, ModelId, ProviderId } from "./shared/protocol";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -77,6 +77,7 @@ interface ParsedArgs {
   conv: string | null;
   provider: ProviderId | null;
   model: ModelId | null;
+  effort: EffortLevel | null;
   systemFile: string | null;
   mimeType: string | null;
   instance: string | null;
@@ -109,6 +110,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     conv: null,
     provider: null,
     model: null,
+    effort: null,
     systemFile: null,
     mimeType: null,
     instance: null,
@@ -173,6 +175,20 @@ function parseArgs(argv: string[]): ParsedArgs {
         result.parseError = err instanceof Error ? err.message : String(err);
         return result;
       }
+      i++;
+      continue;
+    }
+    if (arg === "--effort") {
+      if (i + 1 >= argv.length) {
+        result.parseError = "--effort requires a value";
+        return result;
+      }
+      const effort = argv[++i].trim().toLowerCase();
+      if (effort !== "low" && effort !== "medium" && effort !== "high" && effort !== "max") {
+        result.parseError = `Unknown effort: ${effort}; expected low, medium, high, or max`;
+        return result;
+      }
+      result.effort = effort;
       i++;
       continue;
     }
@@ -320,6 +336,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     result.parseError = "--custom-tool, tool selection, --folder, --auto-title, and --new-conversation-id are only valid when creating a new conversation";
   }
 
+  if (result.effort && result.subcommand !== "send") {
+    result.parseError = "--effort is only valid with exo send";
+  }
+
   return result;
 }
 
@@ -436,6 +456,7 @@ async function main(): Promise<number> {
     folderPath: args.folderPath,
     autoTitle: args.autoTitle,
     newConversationId: args.newConversationId,
+    effort: args.effort,
   };
 
   const conn = new Connection();

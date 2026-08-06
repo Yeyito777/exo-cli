@@ -13,7 +13,8 @@ const MODEL_FLAG_SUMMARY = `  --model <spec>                    Model: openai/gp
   --provider <id>                   Provider: openai | deepseek`;
 
 const MODEL_FLAG_SUMMARY_SEND = `  --model <spec>                    Model: openai/gpt-5.6-sol | deepseek/deepseek-v4-pro
-  --provider <id>                   Provider: openai | deepseek`;
+  --provider <id>                   Provider: openai | deepseek
+  --effort <level>                  Reasoning effort: low | medium | high | max`;
 
 const SUBAGENT_WORKING_DIRECTORY_GUIDANCE = `  Subagents start in the configured global working directory. For project-specific
   work, include the target absolute working directory in the prompt.`;
