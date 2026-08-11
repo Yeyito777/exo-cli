@@ -38,7 +38,7 @@
  */
 
 import { Connection } from "./conn";
-import { send, list, jobs, folderList, folderTree, folderMkdir, folderMove, folderRemove, info, history, deleteConversation, abort, queue, rename, llm, transcribeAudio, status, type OutputOptions } from "./commands";
+import { send, list, jobs, folderList, folderTree, folderMkdir, folderMove, folderRemove, info, history, deleteConversation, abort, queue, rename, generateTitle, llm, transcribeAudio, status, type OutputOptions } from "./commands";
 import { printHelp, printCommandHelp, hasCommandHelp } from "./help";
 import { inferProviderForModel, isProviderId, normalizeModelForProvider, parseModelSpecifier } from "./model-spec";
 import { DEFAULT_SYSTEM_PROMPT, readExactStdin, readExactUtf8File } from "./payload";
@@ -58,6 +58,7 @@ const SUBCOMMANDS = new Set([
   "abort",
   "queue",
   "rename",
+  "generate-title",
   "llm",
   "transcribe",
   "status",
@@ -97,6 +98,7 @@ interface ParsedArgs {
   externalTools: string[] | null;
   folderPath: string | null;
   autoTitle: boolean;
+  fastMode: boolean | null;
   newConversationId: string | null;
   parseError: string | null;
   parseErrorCode: number;
@@ -130,6 +132,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     externalTools: null,
     folderPath: null,
     autoTitle: false,
+    fastMode: null,
     newConversationId: null,
     parseError: null,
     parseErrorCode: 1,
@@ -290,6 +293,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
     if (arg === "--auto-title") { result.autoTitle = true; i++; continue; }
+    if (arg === "--fast") { result.fastMode = true; i++; continue; }
+    if (arg === "--no-fast") { result.fastMode = false; i++; continue; }
     if (arg === "--new-conversation-id") {
       if (i + 1 >= argv.length) {
         result.parseError = "--new-conversation-id requires an ID";
@@ -338,6 +343,9 @@ function parseArgs(argv: string[]): ParsedArgs {
 
   if (result.effort && result.subcommand !== "send") {
     result.parseError = "--effort is only valid with exo send";
+  }
+  if (result.fastMode !== null && result.subcommand !== "send") {
+    result.parseError = "--fast/--no-fast are only valid with exo send";
   }
 
   return result;
@@ -457,6 +465,7 @@ async function main(): Promise<number> {
     autoTitle: args.autoTitle,
     newConversationId: args.newConversationId,
     effort: args.effort,
+    fastMode: args.fastMode ?? undefined,
   };
 
   const conn = new Connection();
@@ -546,6 +555,12 @@ async function main(): Promise<number> {
         const title = args.positionals.slice(1).join(" ");
         if (!convId || !title) { process.stderr.write("Usage: exo rename <convId> <title>\nRun 'exo rename --help' for details.\n"); return 1; }
         return await rename(conn, convId, title);
+      }
+
+      case "generate-title": {
+        const convId = args.positionals[0];
+        if (!convId) { process.stderr.write("Usage: exo generate-title <convId>\nRun 'exo generate-title --help' for details.\n"); return 1; }
+        return await generateTitle(conn, convId);
       }
 
       case "llm": {

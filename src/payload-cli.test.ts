@@ -65,6 +65,7 @@ describe("opaque payload CLI contract", () => {
     expect(send.stdout).toContain("--internal-tool");
     expect(send.stdout).toContain("--folder");
     expect(send.stdout).toContain("--auto-title");
+    expect(send.stdout).toContain("--fast / --no-fast");
     expect(send.stdout).toContain("--new-conversation-id");
     expect(send.stdout).toContain("--effort <level>");
     expect(queue.stdout).toContain("exact UTF-8 message from stdin");
@@ -81,6 +82,7 @@ describe("opaque payload CLI contract", () => {
       [["send", "--effort", "extreme"], "Unknown effort"],
       [["send", "-c", "123-aabbcc", "--auto-title"], "only valid when creating a new conversation"],
       [["send", "-c", "123-aabbcc", "--new-conversation-id", "1785000000000-aabbcc"], "only valid when creating a new conversation"],
+      [["info", "123-aabbcc", "--fast"], "only valid with exo send"],
     ] as const) {
       const result = run([...args], "request");
       expect(result.status).toBe(1);

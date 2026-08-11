@@ -52,6 +52,7 @@ ${b("COMMANDS")}
   abort <id>                        Abort an in-flight stream
   queue <id> [--end]                Queue stdin message for delivery
   rename <id> <title>               Rename a conversation
+  generate-title <id>               Start daemon-owned title generation
   llm [--system-file <path>]        One-shot LLM from stdin
   transcribe <audio-file>           Transcribe audio through exocortexd
   status                            Check if daemon is running
@@ -87,6 +88,7 @@ ${MODEL_FLAG_SUMMARY}
   --external-tool <name>            Exact external-tool selection for a new conversation (repeatable)
   --folder <path>                    Create the conversation in this sidebar folder, creating it if needed
   --auto-title                       Let the daemon title-generation job name the conversation
+  --fast / --no-fast                 Enable/disable OpenAI fast service tier
   --new-conversation-id <id>         Reserve an explicit ID for restart-idempotent creation
 
 ${b("SUBAGENTS")}
@@ -138,6 +140,7 @@ ${MODEL_FLAG_SUMMARY_SEND}
   --external-tool <name>            Select exactly these external tools; repeat for each tool
   --folder <path>                    Place the new conversation in a nested sidebar folder
   --auto-title                       Use daemon-owned title generation instead of a \`cli:\` title
+  --fast / --no-fast                 Enable/disable OpenAI fast service tier
   --new-conversation-id <id>         Reserve an explicit ID for restart-idempotent creation
 
 ${b("CUSTOM INTERNAL TOOLS")}
@@ -318,6 +321,18 @@ Alias: mv
 
 ${b("USAGE")}
   exo rename <convId> "new title"
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
+`,
+
+  "generate-title": `${b("exo generate-title")} <id>
+
+Start the daemon's title-generation job for a conversation. This is useful when
+latency-sensitive main turns should finish before cosmetic title generation runs.
+
+${b("USAGE")}
+  exo generate-title <convId>
 
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}

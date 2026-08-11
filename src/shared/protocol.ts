@@ -26,6 +26,7 @@ export interface NewConversationCommand {
   provider?: ProviderId;
   model?: ModelId;
   effort?: EffortLevel;
+  fastMode?: boolean;
   /** Initial title. Clients that don't set this get an empty title. */
   title?: string;
   /** Prompt text used by the daemon-owned title generation job. */
@@ -102,6 +103,13 @@ export interface SetEffortCommand {
   reqId?: string;
   convId: string;
   effort: EffortLevel;
+}
+
+export interface SetFastModeCommand {
+  type: "set_fast_mode";
+  reqId?: string;
+  convId: string;
+  enabled: boolean;
 }
 
 export interface DeleteConversationCommand {
@@ -280,6 +288,7 @@ export type Command =
   | SendMessageCommand
   | SetModelCommand
   | SetEffortCommand
+  | SetFastModeCommand
   | AbortCommand
   | SubscribeCommand
   | UnsubscribeCommand

@@ -49,6 +49,7 @@ export interface OutputOptions {
   autoTitle?: boolean;
   newConversationId?: string | null;
   effort?: EffortLevel | null;
+  fastMode?: boolean;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -406,6 +407,7 @@ export async function send(
           provider: resolvedProvider ?? undefined,
           model: model ?? undefined,
           effort: opts.effort ?? undefined,
+          fastMode: opts.fastMode,
           title: opts.autoTitle ? undefined : autoTitle(text),
           titleContext: opts.autoTitle ? text : undefined,
           folderId: folder?.folderId,
@@ -426,6 +428,9 @@ export async function send(
     }
     if (opts.effort) {
       conn.send({ type: "set_effort", convId, effort: opts.effort });
+    }
+    if (opts.fastMode !== undefined) {
+      conn.send({ type: "set_fast_mode", convId, enabled: opts.fastMode });
     }
   }
 
@@ -910,6 +915,17 @@ export async function rename(conn: Connection, convId: string, title: string): P
     (e): e is ConversationUpdatedEvent => e.type === "conversation_updated" && e.summary.id === convId,
   );
   process.stdout.write(`Renamed ${convId}\n`);
+  return 0;
+}
+
+/** Starts daemon-owned title generation without coupling it to the conversation's main turn. */
+export async function generateTitle(conn: Connection, convId: string): Promise<number> {
+  const reqId = nextReqId();
+  await conn.request<AckEvent>(
+    { type: "generate_title", reqId, convId },
+    (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+  );
+  process.stdout.write(`Title generation started for ${convId}\n`);
   return 0;
 }
 
