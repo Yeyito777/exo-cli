@@ -33,3 +33,19 @@ custom secondary LLM system prompt comes from `--system-file PATH`, since stdin
 is reserved for the primary prompt.
 
 Run `exo -h` for the complete command reference.
+
+## Delegation models
+
+Almost never use subagents; do the work yourself by default, including testing.
+For warranted delegation, omit `--model` and `--effort` to use `/default-model`.
+The daemon resolves `astra`, `sol`, `terra`, and `luna` to the newest available
+generation of that size. An outdated implicit size default is upgraded for
+delegation without rewriting the saved setting. Effort is normalized for the
+selected model, not forced to medium.
+
+Explicit older OpenAI IDs require `--legacy`, only when the user requests legacy.
+The flag applies to `send`, `queue`, and `llm`, including continued conversations.
+An alias always means latest, even with `--legacy`; select an exact old ID when
+you need one. A legacy unsized default has no safe same-size replacement and
+requires the flag or a current model override. Ordinary interactive conversations
+are unaffected.

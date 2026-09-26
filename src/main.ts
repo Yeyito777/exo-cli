@@ -22,7 +22,8 @@
  *   exo status                      Check daemon health
  *
  * Flags:
- *   --model <spec>                  Model spec (e.g. openai/gpt-5.6-sol)
+ *   --model <spec>                  Model spec or latest size alias (e.g. openai/astra)
+ *   --legacy                        Explicitly allow older delegation models
  *   --provider <id>                 Explicit provider
  *   -c, --conv <id>                 Conversation ID
  *   --json                          JSON output
@@ -79,6 +80,7 @@ interface ParsedArgs {
   provider: ProviderId | null;
   model: ModelId | null;
   effort: EffortLevel | null;
+  legacy: boolean;
   systemFile: string | null;
   mimeType: string | null;
   instance: string | null;
@@ -113,6 +115,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     provider: null,
     model: null,
     effort: null,
+    legacy: false,
     systemFile: null,
     mimeType: null,
     instance: null,
@@ -187,11 +190,11 @@ function parseArgs(argv: string[]): ParsedArgs {
         return result;
       }
       const effort = argv[++i].trim().toLowerCase();
-      if (effort !== "low" && effort !== "medium" && effort !== "high" && effort !== "max") {
-        result.parseError = `Unknown effort: ${effort}; expected low, medium, high, or max`;
+      if (!["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"].includes(effort)) {
+        result.parseError = `Unknown effort: ${effort}; expected none, minimal, low, medium, high, xhigh, max, or ultra`;
         return result;
       }
-      result.effort = effort;
+      result.effort = effort as EffortLevel;
       i++;
       continue;
     }
@@ -205,6 +208,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
     if (arg === "--json") { result.json = true; i++; continue; }
+    if (arg === "--legacy") { result.legacy = true; i++; continue; }
     if (arg === "--full") { result.full = true; i++; continue; }
     if (arg === "--stream") { result.stream = true; i++; continue; }
     if (arg === "--id") { result.idOnly = true; i++; continue; }
@@ -341,8 +345,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     result.parseError = "--custom-tool, tool selection, --folder, --auto-title, and --new-conversation-id are only valid when creating a new conversation";
   }
 
-  if (result.effort && result.subcommand !== "send") {
-    result.parseError = "--effort is only valid with exo send";
+  if (result.effort && result.subcommand !== "send" && result.subcommand !== "llm") {
+    result.parseError = "--effort is only valid with exo send or exo llm";
+  }
+  if (result.legacy && !["send", "queue", "llm"].includes(result.subcommand ?? "")) {
+    result.parseError = "--legacy is only valid with exo send, queue, or llm";
   }
   if (result.fastMode !== null && result.subcommand !== "send") {
     result.parseError = "--fast/--no-fast are only valid with exo send";
@@ -465,6 +472,7 @@ async function main(): Promise<number> {
     autoTitle: args.autoTitle,
     newConversationId: args.newConversationId,
     effort: args.effort,
+    legacy: args.legacy,
     fastMode: args.fastMode ?? undefined,
   };
 
@@ -576,7 +584,7 @@ async function main(): Promise<number> {
       case "queue": {
         const convId = args.positionals[0];
         const timing = args.endTiming ? "message-end" as const : "next-turn" as const;
-        return await queue(conn, convId, primaryPayload!, timing);
+        return await queue(conn, convId, primaryPayload!, timing, args.legacy);
       }
 
       case "send": {

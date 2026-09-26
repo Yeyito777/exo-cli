@@ -49,6 +49,7 @@ export interface OutputOptions {
   autoTitle?: boolean;
   newConversationId?: string | null;
   effort?: EffortLevel | null;
+  legacy?: boolean;
   fastMode?: boolean;
 }
 
@@ -402,6 +403,8 @@ export async function send(
       const created = await conn.request<ConversationCreatedEvent>(
         {
           type: "new_conversation",
+          delegation: true,
+          legacy: opts.legacy,
           reqId,
           convId: draftConfigured || opts.newConversationId ? draftId : undefined,
           provider: resolvedProvider ?? undefined,
@@ -424,7 +427,11 @@ export async function send(
   } else {
     if (model) {
       // Switch model on an existing conversation before starting its next turn.
-      conn.send({ type: "set_model", convId, provider: resolvedProvider ?? undefined, model });
+      const reqId = nextReqId();
+      await conn.request<AckEvent>(
+        { type: "set_model", reqId, convId, provider: resolvedProvider ?? undefined, model, delegation: true, legacy: opts.legacy },
+        (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+      );
     }
     if (opts.effort) {
       conn.send({ type: "set_effort", convId, effort: opts.effort });
@@ -442,6 +449,8 @@ export async function send(
     await conn.request<AckEvent>(
       {
         type: "send_message",
+        delegation: true,
+        legacy: opts.legacy,
         reqId,
         convId,
         text,
@@ -490,13 +499,13 @@ export async function send(
 
   let response: Awaited<ReturnType<typeof collectResponse>>;
   try {
-    response = await collectResponse(conn, convId, text, opts.timeout, onStream);
+    response = await collectResponse(conn, convId, text, opts.timeout, onStream, { delegation: true, legacy: opts.legacy });
   } catch (err: any) {
     // If the conversation is actively streaming, auto-queue for next turn
     if (convId && err?.message?.includes("Already streaming")) {
       const reqId = nextReqId();
       await conn.request<AckEvent>(
-        { type: "queue_message", reqId, convId, text, timing: "next-turn" },
+        { type: "queue_message", reqId, convId, text, timing: "next-turn", delegation: true, legacy: opts.legacy },
         (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
       );
       process.stdout.write("Conversation is busy — message queued for next turn.\n");
@@ -896,10 +905,10 @@ export async function abort(conn: Connection, convId: string): Promise<number> {
 
 // ── queue ──────────────────────────────────────────────────────────
 
-export async function queue(conn: Connection, convId: string, text: string, timing: QueueTiming): Promise<number> {
+export async function queue(conn: Connection, convId: string, text: string, timing: QueueTiming, legacy = false): Promise<number> {
   const reqId = nextReqId();
   await conn.request<AckEvent>(
-    { type: "queue_message", reqId, convId, text, timing },
+    { type: "queue_message", reqId, convId, text, timing, delegation: true, legacy },
     (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
   );
   process.stdout.write(`Queued (${timing}) for ${convId}\n`);
@@ -982,7 +991,7 @@ export async function llm(
   const reqId = nextReqId();
   const resolvedProvider = provider ?? inferProviderForModel(model);
   const event = await conn.request<LlmCompleteResultEvent>(
-    { type: "llm_complete", reqId, provider: resolvedProvider ?? undefined, system, userText, model: model ?? undefined },
+    { type: "llm_complete", reqId, provider: resolvedProvider ?? undefined, system, userText, model: model ?? undefined, delegation: true, legacy: opts.legacy, effort: opts.effort ?? undefined },
     (e): e is LlmCompleteResultEvent => e.type === "llm_complete_result" && e.reqId === reqId,
     opts.timeout,
   );

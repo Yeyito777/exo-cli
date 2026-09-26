@@ -9,20 +9,26 @@ const b = (s: string) => `\x1b[1m${s}\x1b[0m`;
 
 const INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target another worktree daemon instance`;
 
-const MODEL_FLAG_SUMMARY = `  --model <spec>                    Model: openai/gpt-5.6-sol | deepseek/deepseek-v4-pro
+const MODEL_FLAG_SUMMARY = `  --model <spec>                    Model ID or latest size alias: openai/astra | openai/sol
+  --legacy                         Explicitly allow older delegation models
+  --effort <level>                  none | minimal | low | medium | high | xhigh | max | ultra
   --provider <id>                   Provider: openai | deepseek`;
 
-const MODEL_FLAG_SUMMARY_SEND = `  --model <spec>                    Model: openai/gpt-5.6-sol | deepseek/deepseek-v4-pro
+const MODEL_FLAG_SUMMARY_SEND = `  --model <spec>                    Model ID or latest size alias: openai/astra | openai/sol
+  --legacy                         Explicitly allow older delegation models
   --provider <id>                   Provider: openai | deepseek
-  --effort <level>                  Reasoning effort: low | medium | high | max`;
+  --effort <level>                  none | minimal | low | medium | high | xhigh | max | ultra`;
 
 const SUBAGENT_WORKING_DIRECTORY_GUIDANCE = `  Subagents start in the configured global working directory. For project-specific
   work, include the target absolute working directory in the prompt.`;
 
-const SUBAGENT_MODEL_GUIDANCE = `  For OpenAI subagents, prefer the newest family: currently gpt-5.6-sol by
-  default, with gpt-5.6-terra or gpt-5.6-luna for lighter work. Use older
-  generations only when requested or required; omit --model to use the
-  configured default.`;
+const SUBAGENT_MODEL_GUIDANCE = `  Almost never use subagents; do the work yourself by default, including testing.
+  Omit --model and --effort to use the user's /default-model, not the parent's
+  model or a cheaper substitute. astra/sol/terra/luna always select the latest
+  available generation of that size. Outdated implicit size defaults upgrade
+  without changing the saved setting. Older explicit IDs require --legacy,
+  only when the user explicitly requests legacy. Do not downgrade substantial
+  implementation, architecture, or correctness-sensitive work from Astra to Sol.`;
 
 export function printHelp(): void {
   process.stdout.write(`${b("exo")} — Exocortex daemon debugging CLI
@@ -117,8 +123,8 @@ given. Inline message arguments are not accepted.
 
 ${b("USAGE")}
   printf '%s' 'what is 2+2' | exo send             New conversation
-  cat prompt.txt | exo send --model openai/gpt-5.6-sol
-  printf '%s' 'lighter task' | exo send --model openai/gpt-5.6-luna
+  cat prompt.txt | exo send --model openai/astra
+  printf '%s' 'lighter task' | exo send --model openai/luna
   cat prompt.txt | exo send --model deepseek/pro
   printf '%s' 'follow up' | exo send -c <id>       Continue conversation
 
@@ -312,6 +318,7 @@ ${b("USAGE")}
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
   --end                             Deliver at message-end instead of next-turn
+  --legacy                          Explicitly allow an older target model
 `,
 
   rename: `${b("exo rename")} <id> <title>

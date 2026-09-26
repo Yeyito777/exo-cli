@@ -9,6 +9,16 @@ function run(args: string[], input: string | Buffer = "") {
 }
 
 describe("opaque payload CLI contract", () => {
+  test("parses legacy opt-in and current effort levels without connecting", () => {
+    for (const command of ["send", "llm"]) {
+      const result = run([command, "--legacy", "--model", "openai/astra", "--effort", "xhigh"]);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("required on stdin");
+      expect(result.stderr).not.toContain("Unknown");
+    }
+    expect(run(["list", "--legacy"]).stderr).toContain("--legacy is only valid");
+  });
+
   test("rejects inline and legacy sentinel payloads before connecting", () => {
     for (const [args, message] of [
       [["send", "inline"], "send message must be provided via stdin"],
@@ -68,6 +78,9 @@ describe("opaque payload CLI contract", () => {
     expect(send.stdout).toContain("--fast / --no-fast");
     expect(send.stdout).toContain("--new-conversation-id");
     expect(send.stdout).toContain("--effort <level>");
+    expect(send.stdout).toContain("--legacy");
+    expect(top.stdout).toContain("Almost never use subagents");
+    expect(top.stdout).not.toContain("currently gpt-5.6");
     expect(queue.stdout).toContain("exact UTF-8 message from stdin");
     expect(llm.stdout).toContain("--system-file");
   });

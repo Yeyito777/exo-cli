@@ -19,6 +19,8 @@ export interface PingCommand {
 }
 
 export interface NewConversationCommand {
+  delegation?: boolean;
+  legacy?: boolean;
   type: "new_conversation";
   reqId?: string;
   /** Client-generated id required when consuming a draft tool policy. */
@@ -47,6 +49,8 @@ export interface ParentNotificationTarget {
 }
 
 export interface SendMessageCommand {
+  delegation?: boolean;
+  legacy?: boolean;
   type: "send_message";
   reqId?: string;
   convId: string;
@@ -91,6 +95,8 @@ export interface LoadConversationCommand {
 }
 
 export interface SetModelCommand {
+  delegation?: boolean;
+  legacy?: boolean;
   type: "set_model";
   reqId?: string;
   convId: string;
@@ -192,6 +198,8 @@ export interface UndoDeleteCommand {
 export type QueueTiming = "next-turn" | "message-end";
 
 export interface QueueMessageCommand {
+  delegation?: boolean;
+  legacy?: boolean;
   type: "queue_message";
   reqId?: string;
   convId: string;
@@ -215,6 +223,9 @@ export interface UnwindConversationCommand {
 }
 
 export interface LlmCompleteCommand {
+  delegation?: boolean;
+  legacy?: boolean;
+  effort?: EffortLevel;
   type: "llm_complete";
   reqId?: string;
   provider?: ProviderId;

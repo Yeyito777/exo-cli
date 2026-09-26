@@ -7,7 +7,7 @@
  */
 
 import type { Connection } from "./conn";
-import type { Event, Block } from "./shared/protocol";
+import type { Event, Block, SendMessageCommand } from "./shared/protocol";
 
 export interface CollectedResponse {
   convId: string;
@@ -33,6 +33,7 @@ export function collectResponse(
   text: string,
   timeoutMs: number,
   onStream?: StreamCallback,
+  delegation?: Pick<SendMessageCommand, "delegation" | "legacy">,
 ): Promise<CollectedResponse> {
   return new Promise((resolve, reject) => {
     const blocks: Block[] = [];
@@ -90,6 +91,7 @@ export function collectResponse(
     conn.onEvent(handler);
     conn.send({
       type: "send_message",
+      ...delegation,
       convId,
       text,
       startedAt,

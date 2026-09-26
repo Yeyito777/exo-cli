@@ -18,7 +18,7 @@ export type ModelId = string;
 
 // ── Effort ─────────────────────────────────────────────────────────
 
-export type EffortLevel = "low" | "medium" | "high" | "max";
+export type EffortLevel = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "max"];
 export const DEFAULT_EFFORT: EffortLevel = "high";
