@@ -39,37 +39,27 @@ describe("socket transport", () => {
     });
   });
 
-  test("rejects requests and collectors promptly on disconnect", async () => {
-    const trace: string[] = [];
-    const traceSocket = (side: string, socket: any) => {
-      for (const event of ["end", "finish", "close", "error"]) {
-        socket.on(event, () => trace.push(`${side}:${event}`));
-      }
-    };
-    await withDaemon((command, socket) => {
-      trace.push(`server:${command.type}`);
-      traceSocket(`server:${command.type}`, socket);
-      socket.end();
-    }, async ({ conn, commands }) => {
-      traceSocket("client:request", (conn as any).socket);
-      const started = Date.now();
-      await expect(conn.request(
-        { type: "ping", reqId: "close" }, (e): e is PongEvent => e.type === "pong", 2_000,
-      )).rejects.toThrow("closed");
-      expect(Date.now() - started).toBeLessThan(2000);
-      expect((conn as any).listeners).toHaveLength(0);
-      expect((conn as any).disconnectListeners.size).toBe(0);
-      await conn.connect();
-      traceSocket("client:collector", (conn as any).socket);
-      try {
-        await expect(collectResponse(conn, "test", "test", 2_000)).rejects.toThrow("closed");
-      } catch (error) {
-        console.error("Disconnect regression trace:", { trace, commands: commands.map(command => command.type) });
-        throw error;
-      }
-      expect((conn as any).listeners).toHaveLength(0);
+  for (const operation of ["request", "collector"] as const) {
+    test(`${operation} rejects promptly on real peer disconnect`, async () => {
+      // Each CLI invocation owns a fresh connection. Use an independent server
+      // for each case too: Bun's Windows pipe listener did not accept a second
+      // connection after server-side end(), so a reconnect here tested neither
+      // collector EOF handling nor an actual second daemon disconnect.
+      await withDaemon((_command, socket) => socket.end(), async ({ conn, commands }) => {
+        const started = Date.now();
+        const pending = operation === "request" ? conn.request(
+          { type: "ping", reqId: "close" }, (e): e is PongEvent => e.type === "pong", 2_000,
+        ) : collectResponse(conn, "test", "test", 2_000);
+        await expect(pending).rejects.toThrow("closed");
+        expect(Date.now() - started).toBeLessThan(2000);
+        expect(commands.map(command => command.type)).toEqual([
+          operation === "request" ? "ping" : "send_message",
+        ]);
+        expect((conn as any).listeners).toHaveLength(0);
+        expect((conn as any).disconnectListeners.size).toBe(0);
+      });
     });
-  });
+  }
 
   test("readable EOF rejects pending work even when close is deferred", async () => {
     await withDaemon(() => {}, async ({ conn }) => {
