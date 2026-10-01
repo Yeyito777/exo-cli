@@ -58,6 +58,8 @@ export function formatResponseAsJson(response: CollectedResponse): string {
     blocks: response.blocks,
     tokens: response.tokens,
     duration: response.duration,
+    status: response.status,
+    ...(response.stopReason ? { stopReason: response.stopReason } : {}),
   });
 }
 
@@ -68,6 +70,12 @@ export function formatEntriesAsText(entries: DisplayEntry[], full: boolean): str
 
   for (const entry of entries) {
     switch (entry.type) {
+      case "system_instructions":
+        if (full) {
+          parts.push(`\x1b[1;33m▶ Instructions\x1b[0m`);
+          parts.push(entry.text, "");
+        }
+        break;
       case "user":
         parts.push(`\x1b[1;34m▶ You\x1b[0m`);
         parts.push(entry.text);

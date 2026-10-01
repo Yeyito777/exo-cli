@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "path";
 import {
   dataDir,
+  configDir,
+  detectSourceRepoRoot,
   repoRoot,
   runtimeDir,
   setRepoRootOverride,
@@ -44,5 +48,30 @@ describe("path targeting", () => {
 
     expect(worktreeName()).toBe(null);
     expect(repoRoot()).toBe(sourceRepoRoot());
+  });
+
+  test("resolves both source and generated bundle locations without fixed depth", () => {
+    const root = mkdtempSync(join(tmpdir(), "exo-layout-"));
+    try {
+      for (const path of ["daemon/src", "shared/src", "external-tools/exo-cli/src/shared", "external-tools/exo-cli/dist"]) {
+        mkdirSync(join(root, path), { recursive: true });
+      }
+      writeFileSync(join(root, "daemon/src/main.ts"), "");
+      writeFileSync(join(root, "shared/src/protocol.ts"), "");
+      writeFileSync(join(root, "external-tools/exo-cli/package.json"), '{"name":"exo-cli"}');
+      expect(detectSourceRepoRoot(join(root, "external-tools/exo-cli/src/shared"))).toBe(root);
+      expect(detectSourceRepoRoot(join(root, "external-tools/exo-cli/dist"))).toBe(root);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("honors the same isolated config override as the daemon", () => {
+    const previous = process.env.EXOCORTEX_CONFIG_DIR;
+    try {
+      process.env.EXOCORTEX_CONFIG_DIR = join(tmpdir(), "custom-exo-config");
+      expect(configDir()).toBe(process.env.EXOCORTEX_CONFIG_DIR);
+    } finally {
+      if (previous === undefined) delete process.env.EXOCORTEX_CONFIG_DIR;
+      else process.env.EXOCORTEX_CONFIG_DIR = previous;
+    }
   });
 });

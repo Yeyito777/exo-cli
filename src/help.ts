@@ -7,16 +7,17 @@
 
 const b = (s: string) => `\x1b[1m${s}\x1b[0m`;
 
-const INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target another worktree daemon instance`;
+const INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target another worktree daemon instance
+  --repo-root <path>                Select the daemon source/install root`;
 
 const MODEL_FLAG_SUMMARY = `  --model <spec>                    Model ID or latest size alias: openai/astra | openai/sol
   --legacy                         Explicitly allow older delegation models
   --effort <level>                  none | minimal | low | medium | high | xhigh | max | ultra
-  --provider <id>                   Provider: openai | deepseek`;
+  --provider <id>                   openai | deepseek | opencode | openrouter`;
 
 const MODEL_FLAG_SUMMARY_SEND = `  --model <spec>                    Model ID or latest size alias: openai/astra | openai/sol
   --legacy                         Explicitly allow older delegation models
-  --provider <id>                   Provider: openai | deepseek
+  --provider <id>                   openai | deepseek | opencode | openrouter
   --effort <level>                  none | minimal | low | medium | high | xhigh | max | ultra`;
 
 const SUBAGENT_WORKING_DIRECTORY_GUIDANCE = `  Subagents start in the configured global working directory. For project-specific
@@ -34,11 +35,10 @@ export function printHelp(): void {
   process.stdout.write(`${b("exo")} — Exocortex daemon debugging CLI
 
 ${b("PURPOSE")}
-  Debug, inspect, and control Exocortex daemon instances from the shell. Inside
-  an Exocortex conversation, use the native ${b("exo")} internal tool for the
-  current daemon. Use this external CLI primarily to target another daemon or
-  worktree with --instance, troubleshoot socket/protocol behavior, or transcribe
-  audio.
+  Debug, inspect, and control Exocortex daemon instances from the shell.
+  The native ${b("exo")} internal tool starts/aborts subagents; this external CLI
+  handles administration, worktree targeting with --instance, socket/protocol
+  troubleshooting, and audio transcription.
 
 ${b("USAGE")}
   exo status --instance browse-links                Inspect another daemon
@@ -52,6 +52,7 @@ ${b("COMMANDS")}
   send                              Send stdin message to the AI
   list                              List conversations
   jobs                              List running/done conversation jobs
+  models                            Read daemon provider/model capabilities
   info <id>                         Conversation metadata
   history <id>                      Conversation history
   delete <id>                       Delete a conversation
@@ -89,13 +90,12 @@ ${MODEL_FLAG_SUMMARY}
   --foreground                      Disable parent-agent auto-detach for send
   --notify-parent <id>              Notify a parent conversation on send completion
   --no-notify                       Detach send without parent notification
-  --custom-tool <path>              Attach a trusted TS/JS internal-tool module (repeatable)
-  --internal-tool <name>            Exact internal-tool selection for a new conversation (repeatable)
-  --external-tool <name>            Exact external-tool selection for a new conversation (repeatable)
   --folder <path>                    Create the conversation in this sidebar folder, creating it if needed
   --auto-title                       Let the daemon title-generation job name the conversation
   --fast / --no-fast                 Enable/disable OpenAI fast service tier
-  --new-conversation-id <id>         Reserve an explicit ID for restart-idempotent creation
+  --ultrafast                        Request the advertised ultrafast service tier
+  --new-conversation-id <id>         Reserve an explicit ID; inspect before retrying creation
+  --version                         Print the CLI version without connecting
 
 ${b("SUBAGENTS")}
   \`exo send\` starts or continues persisted conversation subagents. From inside
@@ -141,21 +141,11 @@ ${MODEL_FLAG_SUMMARY_SEND}
   --foreground                      Disable parent-agent auto-detach
   --notify-parent <id>              Notify a parent conversation on completion
   --no-notify                       Detach without parent notification
-  --custom-tool <path>              Attach a trusted TS/JS internal-tool module; repeat to attach several
-  --internal-tool <name>            Select exactly these internal tools; repeat for each tool
-  --external-tool <name>            Select exactly these external tools; repeat for each tool
   --folder <path>                    Place the new conversation in a nested sidebar folder
   --auto-title                       Use daemon-owned title generation instead of a \`cli:\` title
   --fast / --no-fast                 Enable/disable OpenAI fast service tier
-  --new-conversation-id <id>         Reserve an explicit ID for restart-idempotent creation
-
-${b("CUSTOM INTERNAL TOOLS")}
-  Custom modules are loaded into an ephemeral draft policy before the
-  conversation is created, so their tools are available during its first turn.
-  Module paths are canonicalized locally and must name trusted TS/JS files.
-
-  cat prompt.txt | exo send --custom-tool ~/tools/assets.ts \
-    --internal-tool read --internal-tool asset_grep --auto-title
+  --ultrafast                        Request ultrafast only if advertised by the daemon catalog
+  --new-conversation-id <id>         Reserve an explicit ID; inspect before retrying creation
 
 ${b("SUBAGENT BEHAVIOR")}
   When exo send is called from inside an Exocortex parent conversation, it
@@ -173,6 +163,27 @@ ${b("SUBAGENT RUNTIME")}
 ${b("OUTPUT")}
   Default: response text + tool call summaries, then "exo:<convId>" on the last line.
   Thinking blocks and tool result output are hidden unless --full is given.
+  --stream emits only NDJSON: daemon events followed by response_complete.
+  Detached/queued outcomes use response_started/message_queued envelopes.
+  --json and --id are also honored when a busy foreground send is queued.
+  Foreground collection follows handoffs; suspended/interrupted responses retain
+  partial blocks and return exit 3/1 instead of claiming successful completion.
+  A timeout or disconnect does not cancel/roll back a daemon job. Inspect it
+  before retrying. Choose only one of --json, --stream, or --id.
+`,
+
+  models: `${b("exo models")} [flags]
+
+Read the daemon's advertised providers, models, supported efforts, and service
+tiers. Model IDs/capabilities are never hardcoded in the CLI.
+
+${b("USAGE")}
+  exo models
+  exo models --json
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
+  --json                            Output the provider catalog as JSON
 `,
 
   list: `${b("exo list")} [flags]

@@ -82,6 +82,12 @@ async function captureHistory(
 }
 
 describe("history", () => {
+  test("keeps pinned instructions out of filtered text but includes them in full/JSON", async () => {
+    const event = loadedEvent({ entries: [{ type: "system_instructions", text: "Pinned instructions" }] });
+    expect(await captureHistory(event)).not.toContain("Pinned instructions");
+    expect(await captureHistory(event, { full: true })).toContain("Pinned instructions");
+    expect(JSON.parse(await captureHistory(event, { json: true }))[0]).toEqual(event.entries[0]);
+  });
   test("includes the pending assistant snapshot in filtered text output", async () => {
     const output = await captureHistory(loadedEvent());
 

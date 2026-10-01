@@ -3,9 +3,8 @@
  * and options, does its work, and returns an exit code.
  */
 
-import { readFile, realpath, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { extname, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
 import type { Connection } from "./conn";
 import type {
   ProviderId,
@@ -25,9 +24,8 @@ import type {
   ConversationSummary,
   FolderSummary,
   SidebarItemRef,
-  ToolPolicyEvent,
-  ToolPolicyMutation,
-  ToolPolicySnapshot,
+  FastMode,
+  ToolsAvailableEvent,
 } from "./shared/protocol";
 import { inferProviderForModel } from "./model-spec";
 import { collectResponse, type StreamCallback } from "./collect";
@@ -42,15 +40,12 @@ export interface OutputOptions {
   detached?: boolean;
   notifyParent?: string | null;
   subagentFolder?: boolean;
-  customToolModules?: string[];
-  internalTools?: string[];
-  externalTools?: string[];
   folderPath?: string | null;
   autoTitle?: boolean;
   newConversationId?: string | null;
   effort?: EffortLevel | null;
   legacy?: boolean;
-  fastMode?: boolean;
+  fastMode?: FastMode;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -72,31 +67,12 @@ function autoTitle(text: string): string {
   return "cli: " + truncate(firstLine, 75);
 }
 
-function clientConversationId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8).padEnd(6, "0")}`;
-}
-
-const CUSTOM_TOOL_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs"]);
-
-async function canonicalCustomToolModulePath(input: string): Promise<string> {
-  const expanded = input === "~" ? homedir() : input.startsWith("~/") ? resolve(homedir(), input.slice(2)) : resolve(input);
-  const canonical = await realpath(expanded).catch((error: any) => {
-    if (error?.code === "ENOENT") throw new Error(`Custom tool module not found: ${expanded}`);
-    throw error;
-  });
-  const details = await stat(canonical);
-  if (!details.isFile()) throw new Error(`Custom tool module is not a file: ${canonical}`);
-  if (!CUSTOM_TOOL_EXTENSIONS.has(extname(canonical).toLowerCase())) {
-    throw new Error(`Unsupported custom tool module extension: ${canonical}`);
-  }
-  return canonical;
-}
-
-async function fetchSidebarState(conn: Connection): Promise<{ conversations: ConversationSummary[]; folders: FolderSummary[] }> {
+async function fetchSidebarState(conn: Connection, timeout?: number): Promise<{ conversations: ConversationSummary[]; folders: FolderSummary[] }> {
   const reqId = nextReqId();
   const event = await conn.request<ConversationsListEvent>(
     { type: "list_conversations", reqId },
     (e): e is ConversationsListEvent => e.type === "conversations_list" && e.reqId === reqId,
+    timeout,
   );
   return { conversations: event.conversations, folders: event.folders ?? [] };
 }
@@ -295,86 +271,6 @@ function makeLiveStreamCallback(targetConvId: string, full: boolean): StreamCall
   };
 }
 
-async function draftToolPolicy(
-  conn: Connection,
-  draftId: string,
-  mutation?: ToolPolicyMutation,
-): Promise<ToolPolicySnapshot> {
-  const reqId = nextReqId();
-  const command = mutation
-    ? { type: "set_draft_tool_policy" as const, reqId, draftId, mutation }
-    : { type: "get_draft_tool_policy" as const, reqId, draftId };
-  const event = await conn.request<ToolPolicyEvent>(
-    command,
-    (candidate): candidate is ToolPolicyEvent => candidate.type === "tool_policy" && candidate.reqId === reqId,
-  );
-  return event.snapshot;
-}
-
-async function clearDraftToolPolicy(conn: Connection, draftId: string): Promise<void> {
-  const reqId = nextReqId();
-  await conn.request<AckEvent>(
-    { type: "clear_draft_tool_policy", reqId, draftId },
-    (event): event is AckEvent => event.type === "ack" && event.reqId === reqId,
-  );
-}
-
-function unique(values: readonly string[]): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
-}
-
-/** Install modules and exact allowlists on a not-yet-created conversation. */
-export async function configureDraftToolPolicy(
-  conn: Connection,
-  draftId: string,
-  options: Pick<OutputOptions, "customToolModules" | "internalTools" | "externalTools">,
-): Promise<ToolPolicySnapshot | null> {
-  const moduleInputs = unique(options.customToolModules ?? []);
-  const hasExactInternal = options.internalTools !== undefined;
-  // An explicit internal allowlist starts a fully scoped policy; callers that
-  // want external tools must opt into them explicitly as well.
-  const hasExactExternal = options.externalTools !== undefined || hasExactInternal;
-  if (moduleInputs.length === 0 && !hasExactInternal && !hasExactExternal) return null;
-
-  const modulePaths = await Promise.all(moduleInputs.map(canonicalCustomToolModulePath));
-  let snapshot = modulePaths.length > 0
-    ? await draftToolPolicy(conn, draftId, { action: "enable", tools: [], modulePaths })
-    : await draftToolPolicy(conn, draftId);
-
-  const availableInternal = new Set(snapshot.internal.map((tool) => tool.name));
-  const availableExternal = new Set(snapshot.external.map((tool) => tool.name));
-  const desiredInternal = new Set(hasExactInternal
-    ? unique(options.internalTools ?? [])
-    : snapshot.internal.filter((tool) => tool.enabled).map((tool) => tool.name));
-  const desiredExternal = new Set(hasExactExternal
-    ? unique(options.externalTools ?? [])
-    : snapshot.external.filter((tool) => tool.enabled).map((tool) => tool.name));
-
-  const unknownInternal = [...desiredInternal].filter((name) => !availableInternal.has(name));
-  const unknownExternal = [...desiredExternal].filter((name) => !availableExternal.has(name));
-  if (unknownInternal.length) throw new Error(`Unknown or unavailable internal tool${unknownInternal.length === 1 ? "" : "s"}: ${unknownInternal.join(", ")}`);
-  if (unknownExternal.length) throw new Error(`Unknown or unavailable external tool${unknownExternal.length === 1 ? "" : "s"}: ${unknownExternal.join(", ")}`);
-  if (desiredExternal.size > 0 && availableInternal.has("bash")) desiredInternal.add("bash");
-
-  const enable = [
-    ...snapshot.internal.filter((tool) => desiredInternal.has(tool.name) && !tool.enabled).map((tool) => ({ kind: "internal" as const, name: tool.name })),
-    ...snapshot.external.filter((tool) => desiredExternal.has(tool.name) && !tool.enabled).map((tool) => ({ kind: "external" as const, name: tool.name })),
-  ];
-  if (enable.length) snapshot = await draftToolPolicy(conn, draftId, { action: "enable", tools: enable });
-
-  const disableExternal = snapshot.external
-    .filter((tool) => tool.enabled && !desiredExternal.has(tool.name))
-    .map((tool) => ({ kind: "external" as const, name: tool.name }));
-  if (disableExternal.length) snapshot = await draftToolPolicy(conn, draftId, { action: "disable", tools: disableExternal });
-
-  const disableInternal = snapshot.internal
-    .filter((tool) => tool.enabled && !desiredInternal.has(tool.name))
-    .map((tool) => ({ kind: "internal" as const, name: tool.name }));
-  if (disableInternal.length) snapshot = await draftToolPolicy(conn, draftId, { action: "disable", tools: disableInternal });
-
-  return snapshot;
-}
-
 export async function send(
   conn: Connection,
   text: string,
@@ -384,46 +280,33 @@ export async function send(
   opts: OutputOptions,
 ): Promise<number> {
   const resolvedProvider = provider ?? inferProviderForModel(model);
-  let configuredPolicy: ToolPolicySnapshot | null = null;
   let createdFolderPath: string | null = null;
 
   // Create conversation if needed
   if (!convId) {
-    const draftId = opts.newConversationId ?? clientConversationId();
-    const draftRequested = (opts.customToolModules?.length ?? 0) > 0
-      || opts.internalTools !== undefined
-      || opts.externalTools !== undefined;
-    let draftConfigured = false;
     const reqId = nextReqId();
-    try {
-      configuredPolicy = await configureDraftToolPolicy(conn, draftId, opts);
-      draftConfigured = configuredPolicy !== null;
-      const folder = opts.folderPath ? await ensureFolderPath(conn, opts.folderPath) : null;
-      createdFolderPath = folder?.path ?? null;
-      const created = await conn.request<ConversationCreatedEvent>(
-        {
-          type: "new_conversation",
-          delegation: true,
-          legacy: opts.legacy,
-          reqId,
-          convId: draftConfigured || opts.newConversationId ? draftId : undefined,
-          provider: resolvedProvider ?? undefined,
-          model: model ?? undefined,
-          effort: opts.effort ?? undefined,
-          fastMode: opts.fastMode,
-          title: opts.autoTitle ? undefined : autoTitle(text),
-          titleContext: opts.autoTitle ? text : undefined,
-          folderId: folder?.folderId,
-          subagent: opts.subagentFolder === true && !folder,
-          draftToolPolicyId: draftConfigured ? draftId : undefined,
-        },
-        (e): e is ConversationCreatedEvent => e.type === "conversation_created" && e.reqId === reqId,
-      );
-      convId = created.convId;
-    } catch (error) {
-      if (draftRequested) await clearDraftToolPolicy(conn, draftId).catch(() => {});
-      throw error;
-    }
+    const folder = opts.folderPath ? await ensureFolderPath(conn, opts.folderPath, opts.timeout) : null;
+    createdFolderPath = folder?.path ?? null;
+    const created = await conn.request<ConversationCreatedEvent>(
+      {
+        type: "new_conversation",
+        delegation: true,
+        legacy: opts.legacy,
+        reqId,
+        convId: opts.newConversationId ?? undefined,
+        provider: resolvedProvider ?? undefined,
+        model: model ?? undefined,
+        effort: opts.effort ?? undefined,
+        fastMode: opts.fastMode,
+        title: opts.autoTitle ? undefined : autoTitle(text),
+        titleContext: opts.autoTitle ? text : undefined,
+        folderId: folder?.folderId,
+        subagent: opts.subagentFolder === true && !folder,
+      },
+      (e): e is ConversationCreatedEvent => e.type === "conversation_created" && e.reqId === reqId,
+      opts.timeout,
+    );
+    convId = created.convId;
   } else {
     if (model) {
       // Switch model on an existing conversation before starting its next turn.
@@ -431,13 +314,24 @@ export async function send(
       await conn.request<AckEvent>(
         { type: "set_model", reqId, convId, provider: resolvedProvider ?? undefined, model, delegation: true, legacy: opts.legacy },
         (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+        opts.timeout,
       );
     }
     if (opts.effort) {
-      conn.send({ type: "set_effort", convId, effort: opts.effort });
+      const reqId = nextReqId();
+      await conn.request<AckEvent>(
+        { type: "set_effort", reqId, convId, effort: opts.effort },
+        (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+        opts.timeout,
+      );
     }
     if (opts.fastMode !== undefined) {
-      conn.send({ type: "set_fast_mode", convId, enabled: opts.fastMode });
+      const reqId = nextReqId();
+      await conn.request<AckEvent>(
+        { type: "set_fast_mode", reqId, convId, enabled: opts.fastMode },
+        (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+        opts.timeout,
+      );
     }
   }
 
@@ -459,16 +353,17 @@ export async function send(
         notifyParent,
       },
       (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+      opts.timeout,
     );
     if (opts.idOnly) {
       process.stdout.write(convId + "\n");
-    } else if (opts.json) {
+    } else if (opts.json || opts.stream) {
       process.stdout.write(JSON.stringify({
+        ...(opts.stream ? { type: "response_started" } : {}),
         convId,
         detached: true,
         notifyParent: notifyParent?.convId ?? null,
         folder: createdFolderPath,
-        toolPolicy: configuredPolicy,
       }) + "\n");
     } else {
       const notifyText = notifyParent
@@ -489,9 +384,8 @@ export async function send(
   const liveText = !opts.json && !opts.stream && !opts.idOnly;
   const onStream: StreamCallback | undefined = opts.stream
     ? (event) => {
-        if ("convId" in event && event.convId === convId) {
-          process.stdout.write(JSON.stringify(event) + "\n");
-        }
+        // The collector already filters by conversation/request identity.
+        process.stdout.write(JSON.stringify(event) + "\n");
       }
     : liveText
       ? makeLiveStreamCallback(convId, opts.full)
@@ -507,8 +401,14 @@ export async function send(
       await conn.request<AckEvent>(
         { type: "queue_message", reqId, convId, text, timing: "next-turn", delegation: true, legacy: opts.legacy },
         (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+        opts.timeout,
       );
-      process.stdout.write("Conversation is busy — message queued for next turn.\n");
+      if (opts.idOnly) process.stdout.write(convId + "\n");
+      else if (opts.json || opts.stream) process.stdout.write(JSON.stringify({
+        ...(opts.stream ? { type: "message_queued" } : {}),
+        convId, queued: true, timing: "next-turn",
+      }) + "\n");
+      else process.stdout.write("Conversation is busy — message queued for next turn.\n");
       return 0;
     }
     throw err;
@@ -524,19 +424,25 @@ export async function send(
     process.stdout.write(response.convId + "\n");
   } else if (opts.json) {
     process.stdout.write(formatResponseAsJson(response) + "\n");
+  } else if (opts.stream) {
+    process.stdout.write(JSON.stringify({ type: "response_complete", ...response }) + "\n");
   } else {
-    // In both live-text and --stream modes the content was already
+    // In live-text mode the content was already
     // written incrementally; just append the conversation ID footer.
     process.stdout.write(`\nexo:${response.convId}\n`);
   }
 
+  if (response.status !== "completed") {
+    process.stderr.write(`Conversation ${response.status} (${response.stopReason}); inspect ${response.convId} before retrying.\n`);
+    return response.status === "suspended" ? 3 : 1;
+  }
   return 0;
 }
 
 // ── list ────────────────────────────────────────────────────────────
 
 export async function list(conn: Connection, opts: OutputOptions): Promise<number> {
-  const event = await fetchSidebarState(conn);
+  const event = await fetchSidebarState(conn, opts.timeout);
 
   if (opts.json) {
     process.stdout.write(JSON.stringify(event.conversations) + "\n");
@@ -562,7 +468,7 @@ export async function list(conn: Connection, opts: OutputOptions): Promise<numbe
 // ── jobs ─────────────────────────────────────────────────────────────
 
 export async function jobs(conn: Connection, opts: OutputOptions): Promise<number> {
-  const { conversations } = await fetchSidebarState(conn);
+  const { conversations } = await fetchSidebarState(conn, opts.timeout);
   const activeJobs = conversations
     .map((conversation) => ({ conversation, status: jobStatus(conversation) }))
     .filter((entry): entry is { conversation: ConversationSummary; status: "running" | "done" } => entry.status !== null);
@@ -594,7 +500,7 @@ export async function jobs(conn: Connection, opts: OutputOptions): Promise<numbe
 // ── folder management ────────────────────────────────────────────
 
 export async function folderList(conn: Connection, path: string | null, opts: OutputOptions): Promise<number> {
-  const state = await fetchSidebarState(conn);
+  const state = await fetchSidebarState(conn, opts.timeout);
   const target = resolveFolderPath(state, path);
   if (!target) throw new Error(`Folder not found: ${path ?? "/"}`);
   const folders = directChildFolders(state, target.folderId);
@@ -631,7 +537,7 @@ export async function folderList(conn: Connection, path: string | null, opts: Ou
 }
 
 export async function folderTree(conn: Connection, path: string | null, opts: OutputOptions): Promise<number> {
-  const state = await fetchSidebarState(conn);
+  const state = await fetchSidebarState(conn, opts.timeout);
   const target = resolveFolderPath(state, path);
   if (!target) throw new Error(`Folder not found: ${path ?? "/"}`);
   const rows = flattenFolderTree(state, target.folderId);
@@ -657,23 +563,25 @@ export async function folderTree(conn: Connection, path: string | null, opts: Ou
   return 0;
 }
 
-async function createFolderAndRefresh(conn: Connection, name: string, parentId: string | null): Promise<SidebarStateSnapshot> {
+async function createFolderAndRefresh(conn: Connection, name: string, parentId: string | null, timeout?: number): Promise<SidebarStateSnapshot> {
   const reqId = nextReqId();
   await conn.request<AckEvent>(
     { type: "create_folder", reqId, name, parentId, items: [] },
     (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+    timeout,
   );
-  return await fetchSidebarState(conn);
+  return await fetchSidebarState(conn, timeout);
 }
 
 export async function ensureFolderPath(
   conn: Connection,
   path: string,
+  timeout?: number,
 ): Promise<{ path: string; folderId: string; created: Array<{ name: string; path: string; parentId: string | null }> }> {
   const normalized = normalizeFolderPath(path);
   if (normalized === "/") throw new Error("Root is not a conversation folder");
   const parts = normalized.split("/").filter(Boolean);
-  let state = await fetchSidebarState(conn);
+  let state = await fetchSidebarState(conn, timeout);
   let parentId: string | null = null;
   let currentPath = "";
   const created: Array<{ name: string; path: string; parentId: string | null }> = [];
@@ -685,7 +593,7 @@ export async function ensureFolderPath(
       parentId = existing.id;
       continue;
     }
-    state = await createFolderAndRefresh(conn, part, parentId);
+    state = await createFolderAndRefresh(conn, part, parentId, timeout);
     const made = state.folders.find((folder) => (folder.parentId ?? null) === parentId && folder.name.toLowerCase() === part.toLowerCase());
     if (!made) throw new Error(`Folder was created but could not be found again: ${currentPath}`);
     created.push({ name: part, path: currentPath, parentId });
@@ -696,7 +604,7 @@ export async function ensureFolderPath(
 }
 
 export async function folderMkdir(conn: Connection, path: string, opts: OutputOptions): Promise<number> {
-  const { path: normalized, created } = await ensureFolderPath(conn, path);
+  const { path: normalized, created } = await ensureFolderPath(conn, path, opts.timeout);
 
   if (opts.json) {
     process.stdout.write(JSON.stringify({ path: normalized, created }) + "\n");
@@ -709,7 +617,7 @@ export async function folderMkdir(conn: Connection, path: string, opts: OutputOp
 }
 
 export async function folderMove(conn: Connection, sources: string[], destinationInput: string, opts: OutputOptions): Promise<number> {
-  const state = await fetchSidebarState(conn);
+  const state = await fetchSidebarState(conn, opts.timeout);
   const items = sources.map((source) => resolveSidebarItem(state, source));
   const seen = new Set<string>();
   const uniqueItems = items.filter((item) => {
@@ -721,13 +629,11 @@ export async function folderMove(conn: Connection, sources: string[], destinatio
   if (uniqueItems.length === 0) throw new Error("folder mv requires at least one source");
   const destination = resolveMoveDestination(state, uniqueItems, destinationInput);
 
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("Timeout waiting for folder move"));
-    }, opts.timeout);
-    const handler = (event: Event) => {
-      if (event.type !== "conversation_moved") return;
+  const reqId = nextReqId();
+  await conn.request(
+    { type: "move_sidebar_items", reqId, items: uniqueItems, parentId: destination.folderId },
+    (event): event is Extract<Event, { type: "conversation_moved" }> => {
+      if (event.type !== "conversation_moved") return false;
       const folders = event.folders ?? state.folders;
       const allMoved = uniqueItems.every((item) => {
         if (item.type === "conversation") {
@@ -737,17 +643,10 @@ export async function folderMove(conn: Connection, sources: string[], destinatio
         const folder = folders.find((f) => f.id === item.id);
         return folder && (folder.parentId ?? null) === destination.folderId;
       });
-      if (!allMoved) return;
-      cleanup();
-      resolve();
-    };
-    const cleanup = () => {
-      clearTimeout(timer);
-      conn.offEvent(handler);
-    };
-    conn.onEvent(handler);
-    conn.send({ type: "move_sidebar_items", items: uniqueItems, parentId: destination.folderId });
-  });
+      return allMoved;
+    },
+    opts.timeout,
+  );
 
   if (opts.json) {
     process.stdout.write(JSON.stringify({ items: uniqueItems, folderId: destination.folderId, folder: destination.path }) + "\n");
@@ -758,29 +657,18 @@ export async function folderMove(conn: Connection, sources: string[], destinatio
 }
 
 export async function folderRemove(conn: Connection, path: string, opts: OutputOptions): Promise<number> {
-  const state = await fetchSidebarState(conn);
+  const state = await fetchSidebarState(conn, opts.timeout);
   const target = resolveFolderPath(state, path);
   if (!target || target.kind !== "folder") throw new Error(`Folder not found: ${path}`);
 
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("Timeout waiting for folder removal"));
-    }, opts.timeout);
-    const handler = (event: Event) => {
-      if (event.type !== "conversation_moved") return;
-      const folders = event.folders ?? [];
-      if (folders.some((folder) => folder.id === target.folderId)) return;
-      cleanup();
-      resolve();
-    };
-    const cleanup = () => {
-      clearTimeout(timer);
-      conn.offEvent(handler);
-    };
-    conn.onEvent(handler);
-    conn.send({ type: "delete_folder", folderId: target.folderId, mode: "recursive" });
-  });
+  const reqId = nextReqId();
+  await conn.request(
+    { type: "delete_folder", reqId, folderId: target.folderId, mode: "recursive" },
+    (event): event is Extract<Event, { type: "conversation_moved" }> =>
+      event.type === "conversation_moved" && event.folders !== undefined
+      && !event.folders.some(folder => folder.id === target.folderId),
+    opts.timeout,
+  );
 
   if (opts.json) {
     process.stdout.write(JSON.stringify({ removed: target.path, folderId: target.folderId }) + "\n");
@@ -803,22 +691,28 @@ export async function info(conn: Connection, convId: string, opts: OutputOptions
     conn.request<ConversationsListEvent>(
       { type: "list_conversations", reqId: listReqId },
       (e): e is ConversationsListEvent => e.type === "conversations_list" && e.reqId === listReqId,
+      opts.timeout,
     ),
     conn.request<ConversationLoadedEvent>(
       { type: "load_conversation", reqId: loadReqId, convId },
       (e): e is ConversationLoadedEvent => e.type === "conversation_loaded" && e.reqId === loadReqId,
+      opts.timeout,
     ),
   ]);
 
   const summary = listEvent.conversations.find((c) => c.id === convId);
+  const messageCount = loadEvent.entries.filter(entry => entry.type !== "system_instructions").length;
 
   if (opts.json) {
     process.stdout.write(JSON.stringify({
       convId: loadEvent.convId,
       title: summary?.title ?? "",
       model: loadEvent.model,
+      provider: loadEvent.provider ?? null,
+      effort: loadEvent.effort,
+      fastMode: loadEvent.fastMode ?? null,
       contextTokens: loadEvent.contextTokens,
-      messageCount: loadEvent.entries.length,
+      messageCount,
       pinned: summary?.pinned ?? false,
       marked: summary?.marked ?? false,
       streaming: summary?.streaming ?? false,
@@ -831,7 +725,10 @@ export async function info(conn: Connection, convId: string, opts: OutputOptions
     process.stdout.write(`Conversation: ${loadEvent.convId}\n`);
     process.stdout.write(`Title:        ${title}\n`);
     process.stdout.write(`Model:        ${loadEvent.model}\n`);
-    process.stdout.write(`Messages:     ${loadEvent.entries.length}\n`);
+    if (loadEvent.provider) process.stdout.write(`Provider:     ${loadEvent.provider}\n`);
+    process.stdout.write(`Effort:       ${loadEvent.effort}\n`);
+    if (loadEvent.fastMode !== undefined) process.stdout.write(`Fast mode:    ${loadEvent.fastMode === "ultrafast" ? "ultrafast" : loadEvent.fastMode ? "yes" : "no"}\n`);
+    process.stdout.write(`Messages:     ${messageCount}\n`);
     process.stdout.write(`Context:      ${loadEvent.contextTokens ?? "unknown"} tokens\n`);
     if (summary?.pinned) process.stdout.write(`Pinned:       yes\n`);
     if (summary?.marked) process.stdout.write(`Marked:       yes\n`);
@@ -866,6 +763,7 @@ export async function history(conn: Connection, convId: string, opts: OutputOpti
   const event = await conn.request<ConversationLoadedEvent>(
     { type: "load_conversation", reqId, convId },
     (e): e is ConversationLoadedEvent => e.type === "conversation_loaded" && e.reqId === reqId,
+    opts.timeout,
   );
   const entries = entriesIncludingPendingAI(event);
 
@@ -881,60 +779,65 @@ export async function history(conn: Connection, convId: string, opts: OutputOpti
 
 // ── delete ──────────────────────────────────────────────────────────
 
-export async function deleteConversation(conn: Connection, convId: string): Promise<number> {
+export async function deleteConversation(conn: Connection, convId: string, opts?: OutputOptions): Promise<number> {
   const reqId = nextReqId();
   await conn.request<ConversationDeletedEvent>(
     { type: "delete_conversation", reqId, convId },
     (e): e is ConversationDeletedEvent => e.type === "conversation_deleted" && e.convId === convId,
+    opts?.timeout,
   );
-  process.stdout.write(`Deleted ${convId}\n`);
+  process.stdout.write(opts?.json ? JSON.stringify({ convId, deleted: true }) + "\n" : `Deleted ${convId}\n`);
   return 0;
 }
 
 // ── abort ───────────────────────────────────────────────────────────
 
-export async function abort(conn: Connection, convId: string): Promise<number> {
+export async function abort(conn: Connection, convId: string, opts?: OutputOptions): Promise<number> {
   const reqId = nextReqId();
   await conn.request<AckEvent>(
     { type: "abort", reqId, convId },
     (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+    opts?.timeout,
   );
-  process.stdout.write("Aborted.\n");
+  process.stdout.write(opts?.json ? JSON.stringify({ convId, aborted: true }) + "\n" : "Aborted.\n");
   return 0;
 }
 
 // ── queue ──────────────────────────────────────────────────────────
 
-export async function queue(conn: Connection, convId: string, text: string, timing: QueueTiming, legacy = false): Promise<number> {
+export async function queue(conn: Connection, convId: string, text: string, timing: QueueTiming, legacy = false, opts?: OutputOptions): Promise<number> {
   const reqId = nextReqId();
   await conn.request<AckEvent>(
     { type: "queue_message", reqId, convId, text, timing, delegation: true, legacy },
     (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+    opts?.timeout,
   );
-  process.stdout.write(`Queued (${timing}) for ${convId}\n`);
+  process.stdout.write(opts?.json ? JSON.stringify({ convId, queued: true, timing }) + "\n" : `Queued (${timing}) for ${convId}\n`);
   return 0;
 }
 
 // ── rename ──────────────────────────────────────────────────────────
 
-export async function rename(conn: Connection, convId: string, title: string): Promise<number> {
+export async function rename(conn: Connection, convId: string, title: string, opts?: OutputOptions): Promise<number> {
   const reqId = nextReqId();
   await conn.request<ConversationUpdatedEvent>(
     { type: "rename_conversation", reqId, convId, title },
     (e): e is ConversationUpdatedEvent => e.type === "conversation_updated" && e.summary.id === convId,
+    opts?.timeout,
   );
-  process.stdout.write(`Renamed ${convId}\n`);
+  process.stdout.write(opts?.json ? JSON.stringify({ convId, title }) + "\n" : `Renamed ${convId}\n`);
   return 0;
 }
 
 /** Starts daemon-owned title generation without coupling it to the conversation's main turn. */
-export async function generateTitle(conn: Connection, convId: string): Promise<number> {
+export async function generateTitle(conn: Connection, convId: string, opts?: OutputOptions): Promise<number> {
   const reqId = nextReqId();
   await conn.request<AckEvent>(
     { type: "generate_title", reqId, convId },
     (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
+    opts?.timeout,
   );
-  process.stdout.write(`Title generation started for ${convId}\n`);
+  process.stdout.write(opts?.json ? JSON.stringify({ convId, titleGeneration: "started" }) + "\n" : `Title generation started for ${convId}\n`);
   return 0;
 }
 
@@ -1014,7 +917,7 @@ export async function status(conn: Connection, opts: OutputOptions): Promise<num
   await conn.request<PongEvent>(
     { type: "ping", reqId },
     (e): e is PongEvent => e.type === "pong" && e.reqId === reqId,
-    5_000,
+    opts.timeout,
   );
 
   const latencyMs = Date.now() - startedAt;
@@ -1024,6 +927,7 @@ export async function status(conn: Connection, opts: OutputOptions): Promise<num
   const listEvent = await conn.request<ConversationsListEvent>(
     { type: "list_conversations", reqId: listReqId },
     (e): e is ConversationsListEvent => e.type === "conversations_list" && e.reqId === listReqId,
+    opts.timeout,
   );
 
   const convCount = listEvent.conversations.length;
@@ -1044,5 +948,27 @@ export async function status(conn: Connection, opts: OutputOptions): Promise<num
     }
   }
 
+  return 0;
+}
+
+/** Read advertised model/effort/service-tier capabilities from the daemon. */
+export async function models(conn: Connection, opts: OutputOptions): Promise<number> {
+  const event = await conn.request<ToolsAvailableEvent>(
+    { type: "ping", reqId: nextReqId() },
+    (e): e is ToolsAvailableEvent => {
+      if (e.type !== "tools_available") return false;
+      if (!e.providers) throw new Error("This daemon does not publish a provider catalog");
+      return true;
+    },
+    opts.timeout,
+  );
+  if (opts.json) process.stdout.write(JSON.stringify(event.providers) + "\n");
+  else for (const provider of event.providers!) {
+    process.stdout.write(`${provider.id} (default ${provider.defaultModel})\n`);
+    for (const model of provider.models) {
+      const fast = model.supportsFastMode ?? provider.supportsFastMode;
+      process.stdout.write(`  ${provider.id}/${model.id}  effort:${model.supportedEfforts.map(e => e.effort).join("|")}${fast ? "  fast" : ""}${model.supportsUltrafastMode ? "  ultrafast" : ""}\n`);
+    }
+  }
   return 0;
 }

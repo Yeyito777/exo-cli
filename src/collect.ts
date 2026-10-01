@@ -7,7 +7,7 @@
  */
 
 import type { Connection } from "./conn";
-import type { Event, Block, SendMessageCommand } from "./shared/protocol";
+import type { Event, Block, SendMessageCommand, StreamingStopReason } from "./shared/protocol";
 
 export interface CollectedResponse {
   convId: string;
@@ -17,6 +17,8 @@ export interface CollectedResponse {
   tokens: number;
   /** Wall-clock duration in seconds. */
   duration: number;
+  status: "completed" | "interrupted" | "suspended";
+  stopReason?: StreamingStopReason | "aborted";
 }
 
 export type StreamCallback = (event: Event) => void;
@@ -39,6 +41,9 @@ export function collectResponse(
     const blocks: Block[] = [];
     let tokens = 0;
     const startedAt = Date.now();
+    const reqId = `send_${startedAt}_${Math.random().toString(36).slice(2)}`;
+    let active = false;
+    let handoff = false;
 
     const timer = setTimeout(() => {
       cleanup();
@@ -51,9 +56,25 @@ export function collectResponse(
       process.stderr.write("waiting for response…\n");
     }, 5_000);
 
-    const handler = (event: Event) => {
+    const handleEvent = (event: Event) => {
+      // A request-correlated error can be global (no convId).
+      if (event.type === "error" && event.reqId === reqId) {
+        onStream?.(event);
+        cleanup();
+        reject(new Error(event.message));
+        return;
+      }
       // Only care about events for our conversation
       if (!("convId" in event) || event.convId !== convId) return;
+      if (event.type === "error" && event.reqId && event.reqId !== reqId) return;
+      if (event.type === "streaming_started") {
+        if (!handoff && event.startedAt !== startedAt) return;
+        active = true;
+        handoff = false;
+      }
+      // Subscribe may replay the previous stream's snapshot/stop before this
+      // send is dispatched. Don't confuse that with completion of our request.
+      if (event.type !== "error" && !active) return;
 
       onStream?.(event);
 
@@ -65,13 +86,18 @@ export function collectResponse(
           break;
 
         case "streaming_stopped":
-          // The full agentic loop is done.
+          // Queued/goal successor turns are part of the same foreground chain.
+          if (event.reason === "handoff") { active = false; handoff = true; return; }
+          if (event.persistedBlocks !== undefined) blocks.push(...event.persistedBlocks);
           cleanup();
           resolve({
             convId,
             blocks,
             tokens,
             duration: (Date.now() - startedAt) / 1000,
+            status: event.reason === "suspended" ? "suspended"
+              : event.reason || event.persistedBlocks !== undefined ? "interrupted" : "completed",
+            stopReason: event.reason ?? (event.persistedBlocks !== undefined ? "aborted" : undefined),
           });
           break;
 
@@ -81,20 +107,29 @@ export function collectResponse(
           break;
       }
     };
+    const fail = (error: Error) => { cleanup(); reject(error); };
+    const handler = (event: Event) => {
+      try { handleEvent(event); } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      }
+    };
 
     const cleanup = () => {
       clearTimeout(timer);
       clearTimeout(waitHint);
       conn.offEvent(handler);
+      conn.offDisconnect(fail);
     };
 
     conn.onEvent(handler);
-    conn.send({
+    conn.onDisconnect(fail);
+    try { conn.send({
       type: "send_message",
+      reqId,
       ...delegation,
       convId,
       text,
       startedAt,
-    });
+    }); } catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
   });
 }

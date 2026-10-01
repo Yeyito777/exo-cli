@@ -19,19 +19,34 @@
  */
 
 import { basename, dirname, join, resolve } from "path";
+import { existsSync, readFileSync } from "node:fs";
 
 // ── Repo root ───────────────────────────────────────────────────────
 // This file lives at <repo>/external-tools/exo-cli/src/shared/paths.ts
 // — four levels up is the source repo root.
 
-function detectSourceRepoRoot(): string {
+export function detectSourceRepoRoot(startDirectory = import.meta.dir): string {
   // A compiled Windows exo.exe is installed beside exocortexd.exe and shares
   // that daemon's config root. Under source execution, process.execPath is
   // bun.exe and import.meta.dir points into the checkout.
   if (process.platform === "win32" && !/^bun(?:\.exe)?$/i.test(basename(process.execPath))) {
     return dirname(process.execPath);
   }
-  return resolve(import.meta.dir, "../../../..");
+  // Works from both src/shared/paths.ts and a generated dist/exo.js bundle.
+  let directory = startDirectory;
+  let projectRoot: string | null = null;
+  while (true) {
+    if (existsSync(join(directory, "daemon/src/main.ts")) && existsSync(join(directory, "shared/src/protocol.ts"))) return directory;
+    try {
+      if (JSON.parse(readFileSync(join(directory, "package.json"), "utf8")).name === "exo-cli") projectRoot = directory;
+    } catch { /* Not a package root. */ }
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  // Conventional external-tools/exo-cli installation; standalone users can
+  // select a checkout explicitly with --repo-root.
+  return resolve(projectRoot ?? startDirectory, "../..");
 }
 
 const SOURCE_REPO_ROOT = detectSourceRepoRoot();
@@ -50,7 +65,9 @@ function effectiveWorktreeName(): string | null {
 }
 
 function configDirForRoot(root: string): string {
-  return join(root, "config");
+  return process.env.EXOCORTEX_CONFIG_DIR?.trim()
+    ? resolve(process.env.EXOCORTEX_CONFIG_DIR)
+    : join(root, "config");
 }
 
 // ── Public API ──────────────────────────────────────────────────────

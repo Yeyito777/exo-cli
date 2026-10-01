@@ -66,6 +66,8 @@ describe("delegation wire policy", () => {
     const conn = {
       onEvent: (callback: typeof handler) => { handler = callback; },
       offEvent: () => {},
+      onDisconnect: () => {},
+      offDisconnect: () => {},
       send: (command: Command) => {
         commands.push(command);
         handler({ type: "error", convId: "child", message: "test stop" } as Event);

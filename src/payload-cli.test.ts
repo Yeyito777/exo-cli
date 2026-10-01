@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
-const cli = resolve(import.meta.dir, "../bin/exo");
+const cli = resolve(import.meta.dir, "./main.ts");
 
 function run(args: string[], input: string | Buffer = "") {
-  return spawnSync(cli, args, { input, encoding: "utf8" });
+  return spawnSync(process.execPath, [cli, ...args], { input, encoding: "utf8", timeout: 5000 });
 }
 
 describe("opaque payload CLI contract", () => {
@@ -71,8 +71,8 @@ describe("opaque payload CLI contract", () => {
     const llm = run(["llm", "-h"]);
     expect(top.stdout).toContain("read their exact UTF-8 message/prompt from stdin");
     expect(send.stdout).toContain("Inline message arguments are not accepted");
-    expect(send.stdout).toContain("--custom-tool");
-    expect(send.stdout).toContain("--internal-tool");
+    expect(send.stdout).not.toContain("--custom-tool");
+    expect(send.stdout).not.toContain("--internal-tool");
     expect(send.stdout).toContain("--folder");
     expect(send.stdout).toContain("--auto-title");
     expect(send.stdout).toContain("--fast / --no-fast");
@@ -85,12 +85,12 @@ describe("opaque payload CLI contract", () => {
     expect(llm.stdout).toContain("--system-file");
   });
 
-  test("validates new-conversation tool flags before connecting", () => {
+  test("rejects retired selections and validates creation flags before connecting", () => {
     for (const [args, message] of [
-      [["send", "--custom-tool"], "--custom-tool requires a module path"],
-      [["send", "--internal-tool"], "--internal-tool requires a tool name"],
-      [["send", "--external-tool"], "--external-tool requires a tool name"],
-      [["send", "--folder"], "--folder requires a sidebar folder path"],
+      [["send", "--custom-tool"], "--custom-tool is retired"],
+      [["send", "--internal-tool"], "--internal-tool is retired"],
+      [["send", "--external-tool"], "--external-tool is retired"],
+      [["send", "--folder"], "--folder requires a value"],
       [["send", "--new-conversation-id", "invalid"], "must match <13-digit timestamp>"],
       [["send", "--effort", "extreme"], "Unknown effort"],
       [["send", "-c", "123-aabbcc", "--auto-title"], "only valid when creating a new conversation"],

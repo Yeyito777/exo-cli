@@ -1,17 +1,35 @@
 /**
  * @exocortex/shared — Message and block domain model.
  *
- * The single source of truth for the core data structures shared
- * between the daemon and all clients. Blocks are the atoms of an
- * AI message. Messages are the units of a conversation.
- *
- * Package-specific extensions (ApiMessage, Conversation, helpers)
- * live in each package's own messages.ts and re-export from here.
+ * CLI wire projection. The authoritative contract lives in Exocortex's
+ * shared/src/messages.ts; scripts/check-contract.ts checks compatibility.
  */
 
 // ── Providers / Models ──────────────────────────────────────────────
 
-export type ProviderId = "openai" | "deepseek";
+export type ProviderId = "openai" | "deepseek" | "opencode" | "openrouter";
+export type FastMode = boolean | "ultrafast";
+
+export interface ModelInfo {
+  id: ModelId;
+  label: string;
+  maxContext: number;
+  supportedEfforts: { effort: EffortLevel; description: string }[];
+  defaultEffort: EffortLevel;
+  supportsImages?: boolean;
+  supportsTools?: boolean;
+  supportsFastMode?: boolean;
+  supportsUltrafastMode?: boolean;
+}
+
+export interface ProviderInfo {
+  id: ProviderId;
+  label: string;
+  defaultModel: ModelId;
+  allowsCustomModels: boolean;
+  supportsFastMode: boolean;
+  models: ModelInfo[];
+}
 
 /** Provider-scoped model identifier. */
 export type ModelId = string;
@@ -20,22 +38,8 @@ export type ModelId = string;
 
 export type EffortLevel = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
-export const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "max"];
+export const EFFORT_LEVELS: readonly EffortLevel[] = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 export const DEFAULT_EFFORT: EffortLevel = "high";
-
-/** Maximum context window size in tokens, per model. */
-export const MAX_CONTEXT: Record<string, number> = {
-  "gpt-5": 400_000,
-  "gpt-5.6-sol": 372_000,
-  "gpt-5.6-terra": 372_000,
-  "gpt-5.6-luna": 372_000,
-  "gpt-5.5": 272_000,
-  "gpt-5.4": 272_000,
-  "gpt-5.4-mini": 272_000,
-  "gpt-5.3-codex-spark": 128_000,
-  "deepseek-v4-pro": 1_000_000,
-  "deepseek-v4-flash": 1_000_000,
-};
 
 // ── Image attachments ──────────────────────────────────────────────
 
@@ -203,48 +207,6 @@ export interface ToolDisplayInfo {
   name: string;     // "bash", "read", etc.
   label: string;    // "$", "Read", etc.
   color: string;    // hex color "#d19a66"
-}
-
-// ── Per-conversation tool policy ───────────────────────────────────
-
-export type ToolPolicyKind = "internal" | "external";
-
-export interface ToolPolicyRef {
-  kind: ToolPolicyKind;
-  name: string;
-}
-
-export type ToolPolicyMutation =
-  | {
-      action: "enable" | "disable";
-      tools: ToolPolicyRef[];
-      /** TypeScript/JavaScript tool modules to attach or detach. */
-      modulePaths?: string[];
-    }
-  | { action: "reset" };
-
-export interface ToolPolicyAvailability {
-  name: string;
-  label: string;
-  enabled: boolean;
-  color?: string;
-  modulePath?: string;
-}
-
-export interface ToolPolicyModuleAvailability {
-  path: string;
-  digest: string;
-  tools: string[];
-}
-
-export interface ToolPolicySnapshot {
-  convId: string;
-  scoped: boolean;
-  source: "default" | "explicit";
-  internal: ToolPolicyAvailability[];
-  external: ToolPolicyAvailability[];
-  modules?: ToolPolicyModuleAvailability[];
-  shellWarning: boolean;
 }
 
 /**

@@ -1,15 +1,15 @@
 /**
  * @exocortex/shared — IPC protocol.
  *
- * The single source of truth for the wire contract between
- * exocortexd and its clients.
+ * CLI wire projection. The authority is Exocortex/shared/src/protocol.ts;
+ * scripts/check-contract.ts verifies outbound commands and inbound events.
  *
  * Transport: Unix domain socket, newline-delimited JSON.
  * Commands flow client → daemon. Events flow daemon → client.
  */
 
-import type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, FolderSummary, SidebarItemRef, ToolDisplayInfo, ExternalToolStyle, ImageAttachment, ToolPolicyMutation, ToolPolicySnapshot } from "./messages";
-export type { ProviderId, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, FolderSummary, SidebarItemRef, ToolDisplayInfo, ExternalToolStyle, ImageAttachment, ToolPolicyMutation, ToolPolicySnapshot };
+import type { ProviderId, ProviderInfo, FastMode, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, FolderSummary, SidebarItemRef, ToolDisplayInfo, ExternalToolStyle, ImageAttachment } from "./messages";
+export type { ProviderId, ProviderInfo, FastMode, ModelId, EffortLevel, Block, MessageMetadata, UsageData, ConversationSummary, FolderSummary, SidebarItemRef, ToolDisplayInfo, ExternalToolStyle, ImageAttachment };
 
 // ── Commands (client → daemon) ──────────────────────────────────────
 
@@ -23,12 +23,12 @@ export interface NewConversationCommand {
   legacy?: boolean;
   type: "new_conversation";
   reqId?: string;
-  /** Client-generated id required when consuming a draft tool policy. */
+  /** Optional client-supplied ID; inspect state before retrying a timed-out creation. */
   convId?: string;
   provider?: ProviderId;
   model?: ModelId;
   effort?: EffortLevel;
-  fastMode?: boolean;
+  fastMode?: FastMode;
   /** Initial title. Clients that don't set this get an empty title. */
   title?: string;
   /** Prompt text used by the daemon-owned title generation job. */
@@ -37,8 +37,6 @@ export interface NewConversationCommand {
   folderId?: string | null;
   /** If true, the daemon creates/reuses the top-level "subagents" folder for this conversation. */
   subagent?: boolean;
-  /** Ephemeral draft whose tool policy is consumed atomically at creation. */
-  draftToolPolicyId?: string;
 }
 
 export interface ParentNotificationTarget {
@@ -115,7 +113,7 @@ export interface SetFastModeCommand {
   type: "set_fast_mode";
   reqId?: string;
   convId: string;
-  enabled: boolean;
+  enabled: FastMode;
 }
 
 export interface DeleteConversationCommand {
@@ -150,6 +148,12 @@ export interface RenameConversationCommand {
   reqId?: string;
   convId: string;
   title: string;
+}
+
+export interface GenerateTitleCommand {
+  type: "generate_title";
+  reqId?: string;
+  convId: string;
 }
 
 export interface CloneConversationCommand {
@@ -242,38 +246,6 @@ export interface GetSystemPromptCommand {
   reqId?: string;
 }
 
-export interface GetToolPolicyCommand {
-  type: "get_tool_policy";
-  reqId?: string;
-  convId: string;
-}
-
-export interface SetToolPolicyCommand {
-  type: "set_tool_policy";
-  reqId?: string;
-  convId: string;
-  mutation: ToolPolicyMutation;
-}
-
-export interface GetDraftToolPolicyCommand {
-  type: "get_draft_tool_policy";
-  reqId?: string;
-  draftId: string;
-}
-
-export interface SetDraftToolPolicyCommand {
-  type: "set_draft_tool_policy";
-  reqId?: string;
-  draftId: string;
-  mutation: ToolPolicyMutation;
-}
-
-export interface ClearDraftToolPolicyCommand {
-  type: "clear_draft_tool_policy";
-  reqId?: string;
-  draftId: string;
-}
-
 export interface TranscribeAudioCommand {
   type: "transcribe_audio";
   reqId?: string;
@@ -306,28 +278,14 @@ export type Command =
   | ListConversationsCommand
   | LoadConversationCommand
   | DeleteConversationCommand
-  | MarkConversationCommand
-  | PinConversationCommand
-  | MoveConversationCommand
   | RenameConversationCommand
-  | CloneConversationCommand
+  | GenerateTitleCommand
   | CreateFolderCommand
   | MoveSidebarItemsCommand
   | DeleteFolderCommand
-  | UndoDeleteCommand
   | QueueMessageCommand
-  | UnqueueMessageCommand
-  | UnwindConversationCommand
   | LlmCompleteCommand
-  | GetSystemPromptCommand
-  | GetToolPolicyCommand
-  | SetToolPolicyCommand
-  | GetDraftToolPolicyCommand
-  | SetDraftToolPolicyCommand
-  | ClearDraftToolPolicyCommand
-  | TranscribeAudioCommand
-  | LoginCommand
-  | LogoutCommand;
+  | TranscribeAudioCommand;
 
 // ── Events (daemon → client) ────────────────────────────────────────
 
@@ -361,9 +319,12 @@ export interface StreamingStartedEvent {
   tokens?: number;
 }
 
+export type StreamingStopReason = "daemon-restart" | "handoff" | "unwind" | "suspended";
+
 export interface StreamingStoppedEvent {
   type: "streaming_stopped";
   convId: string;
+  reason?: StreamingStopReason;
   /** On abort/error: the blocks that were safe to persist. TUI replaces its pending blocks with these. */
   persistedBlocks?: Block[];
 }
@@ -426,7 +387,7 @@ export interface MessageCompleteEvent {
 
 export interface UsageUpdateEvent {
   type: "usage_update";
-  usage: UsageData;
+  usage: UsageData | null;
 }
 
 export interface ConversationsListEvent {
@@ -442,6 +403,7 @@ export interface AIMessagePayload {
 }
 
 export type DisplayEntry =
+  | { type: "system_instructions"; text: string }
   | { type: "user"; text: string; images?: ImageAttachment[] }
   | { type: "ai"; blocks: Block[]; metadata: MessageMetadata | null }
   | { type: "system"; text: string; color?: string };
@@ -455,8 +417,10 @@ export interface ConversationLoadedEvent {
   type: "conversation_loaded";
   reqId?: string;
   convId: string;
+  provider?: ProviderId;
   model: ModelId;
   effort: EffortLevel;
+  fastMode?: FastMode;
   /** All messages in display order, excluding the currently in-flight assistant snapshot. */
   entries: DisplayEntry[];
   /** Live assistant snapshot for actively streaming conversations. */
@@ -527,6 +491,7 @@ export interface SystemMessageEvent {
 export interface ToolsAvailableEvent {
   type: "tools_available";
   tools: ToolDisplayInfo[];
+  providers?: ProviderInfo[];
   externalToolStyles?: ExternalToolStyle[];
 }
 
@@ -551,14 +516,6 @@ export interface SystemPromptEvent {
   systemPrompt: string;
 }
 
-export interface ToolPolicyEvent {
-  type: "tool_policy";
-  reqId?: string;
-  convId: string;
-  snapshot: ToolPolicySnapshot;
-  changed: boolean;
-}
-
 export interface TranscriptionResultEvent {
   type: "transcription_result";
   reqId?: string;
@@ -568,7 +525,7 @@ export interface TranscriptionResultEvent {
 export interface AuthStatusEvent {
   type: "auth_status";
   reqId?: string;
-  message: string;
+  message?: string;
   /** When set, the TUI should open this URL in the user's browser. */
   openUrl?: string;
 }
@@ -610,7 +567,6 @@ export type Event =
   | HistoryUpdatedEvent
   | LlmCompleteResultEvent
   | SystemPromptEvent
-  | ToolPolicyEvent
   | TranscriptionResultEvent
   | AuthStatusEvent
   | ErrorEvent;

@@ -1,8 +1,14 @@
 {
   "name": "exo-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Debug and administer Exocortex daemon instances from the shell",
   "type": "module",
+  "scripts": {
+    "test": "bun test --timeout 30000",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/main.ts --target bun --outfile dist/exo.js",
+    "check:contract": "bun run scripts/check-contract.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5.7"

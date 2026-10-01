@@ -9,16 +9,20 @@
 
 import { connect, type Socket } from "net";
 import { existsSync } from "fs";
+import { StringDecoder } from "node:string_decoder";
 import { socketPath, worktreeName } from "./shared/paths";
 import type { Command, Event } from "./shared/protocol";
 
 export class Connection {
   private socket: Socket | null = null;
   private buffer = "";
+  private decoder = new StringDecoder("utf8");
   private listeners: Array<(event: Event) => void> = [];
+  private disconnectListeners = new Set<(error: Error) => void>();
 
   /** Connect to the daemon. Throws if socket doesn't exist or connection fails. */
-  async connect(): Promise<void> {
+  async connect(timeoutMs = 10_000): Promise<void> {
+    if (this.socket) throw new Error("Already connected");
     const path = socketPath();
     const instance = worktreeName();
     // Windows named pipes are kernel objects and never appear in the filesystem.
@@ -34,25 +38,44 @@ export class Connection {
     return new Promise((resolve, reject) => {
       const socket = connect(path);
       let resolved = false;
+      let failed = false;
+      const timer = setTimeout(() => {
+        reject(new Error("Timeout connecting to exocortexd"));
+        socket.destroy();
+      }, timeoutMs);
 
       socket.on("connect", () => {
+        clearTimeout(timer);
         this.socket = socket;
+        this.buffer = "";
+        this.decoder = new StringDecoder("utf8");
         resolved = true;
         resolve();
       });
-      socket.on("data", (data) => this.onData(data));
+      socket.on("data", (data) => {
+        if (this.socket === socket) this.onData(data);
+      });
       socket.on("error", (err) => {
-        if (!resolved) reject(new Error(`Connection failed: ${err.message}`));
+        clearTimeout(timer);
+        failed = true;
+        const error = new Error(`Connection failed: ${err.message}`);
+        if (!resolved) reject(error);
+        else this.connectionLost(socket, error);
       });
       socket.on("close", () => {
-        this.socket = null;
+        clearTimeout(timer);
+        if (!resolved) reject(new Error("Connection closed before connecting"));
+        else if (!failed) this.connectionLost(socket, new Error("Connection to exocortexd closed"));
       });
     });
   }
 
   disconnect(): void {
-    this.socket?.end();
-    this.socket = null;
+    if (!this.socket) return;
+    const socket = this.socket;
+    this.connectionLost(socket, new Error("Disconnected from exocortexd"));
+    socket.end();
+    socket.unref();
   }
 
   /** Send a command to the daemon. */
@@ -70,6 +93,14 @@ export class Connection {
   offEvent(listener: (event: Event) => void): void {
     const idx = this.listeners.indexOf(listener);
     if (idx !== -1) this.listeners.splice(idx, 1);
+  }
+
+  onDisconnect(listener: (error: Error) => void): void {
+    this.disconnectListeners.add(listener);
+  }
+
+  offDisconnect(listener: (error: Error) => void): void {
+    this.disconnectListeners.delete(listener);
   }
 
   /**
@@ -94,38 +125,55 @@ export class Connection {
           reject(new Error(event.message));
           return;
         }
-        if (match(event)) {
-          cleanup();
-          resolve(event);
-        }
+        try {
+          if (match(event)) {
+            cleanup();
+            resolve(event);
+          }
+        } catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
       };
+      const fail = (error: Error) => { cleanup(); reject(error); };
 
       const cleanup = () => {
         clearTimeout(timer);
         this.offEvent(handler);
+        this.offDisconnect(fail);
       };
 
       this.onEvent(handler);
-      this.send(command);
+      this.onDisconnect(fail);
+      try { this.send(command); } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
   // ── Internal ────────────────────────────────────────────────────
 
+  private connectionLost(socket: Socket, error: Error): void {
+    // A late close from an old connection must not tear down a reconnected one.
+    if (this.socket !== socket) return;
+    this.socket = null;
+    for (const listener of [...this.disconnectListeners]) listener(error);
+  }
+
   private onData(data: Buffer | string): void {
-    this.buffer += typeof data === "string" ? data : data.toString("utf-8");
+    this.buffer += typeof data === "string" ? data : this.decoder.write(data);
 
     let idx: number;
     while ((idx = this.buffer.indexOf("\n")) !== -1) {
       const line = this.buffer.slice(0, idx).trim();
       this.buffer = this.buffer.slice(idx + 1);
       if (!line) continue;
-      try {
-        const event = JSON.parse(line) as Event;
-        for (const listener of [...this.listeners]) listener(event);
-      } catch {
+      let event: Event;
+      try { event = JSON.parse(line) as Event; } catch {
         // Malformed event — skip
+        continue;
       }
+      if (!event || typeof event.type !== "string") continue;
+      // Listener exceptions are not malformed JSON. Operations handle their own
+      // callback failures so they reject and clean up rather than timing out.
+      for (const listener of [...this.listeners]) listener(event);
     }
   }
 }
