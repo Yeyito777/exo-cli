@@ -40,7 +40,18 @@ describe("socket transport", () => {
   });
 
   test("rejects requests and collectors promptly on disconnect", async () => {
-    await withDaemon((_command, socket) => socket.end(), async ({ conn }) => {
+    const trace: string[] = [];
+    const traceSocket = (side: string, socket: any) => {
+      for (const event of ["end", "finish", "close", "error"]) {
+        socket.on(event, () => trace.push(`${side}:${event}`));
+      }
+    };
+    await withDaemon((command, socket) => {
+      trace.push(`server:${command.type}`);
+      traceSocket(`server:${command.type}`, socket);
+      socket.end();
+    }, async ({ conn, commands }) => {
+      traceSocket("client:request", (conn as any).socket);
       const started = Date.now();
       await expect(conn.request(
         { type: "ping", reqId: "close" }, (e): e is PongEvent => e.type === "pong", 2_000,
@@ -49,7 +60,13 @@ describe("socket transport", () => {
       expect((conn as any).listeners).toHaveLength(0);
       expect((conn as any).disconnectListeners.size).toBe(0);
       await conn.connect();
-      await expect(collectResponse(conn, "test", "test", 2_000)).rejects.toThrow("closed");
+      traceSocket("client:collector", (conn as any).socket);
+      try {
+        await expect(collectResponse(conn, "test", "test", 2_000)).rejects.toThrow("closed");
+      } catch (error) {
+        console.error("Disconnect regression trace:", { trace, commands: commands.map(command => command.type) });
+        throw error;
+      }
       expect((conn as any).listeners).toHaveLength(0);
     });
   });
