@@ -43,14 +43,32 @@ describe("socket transport", () => {
     await withDaemon((_command, socket) => socket.end(), async ({ conn }) => {
       const started = Date.now();
       await expect(conn.request(
-        { type: "ping", reqId: "close" }, (e): e is PongEvent => e.type === "pong", 30_000,
+        { type: "ping", reqId: "close" }, (e): e is PongEvent => e.type === "pong", 2_000,
       )).rejects.toThrow("closed");
       expect(Date.now() - started).toBeLessThan(2000);
       expect((conn as any).listeners).toHaveLength(0);
       expect((conn as any).disconnectListeners.size).toBe(0);
       await conn.connect();
-      await expect(collectResponse(conn, "test", "test", 30_000)).rejects.toThrow("closed");
+      await expect(collectResponse(conn, "test", "test", 2_000)).rejects.toThrow("closed");
       expect((conn as any).listeners).toHaveLength(0);
+    });
+  });
+
+  test("readable EOF rejects pending work even when close is deferred", async () => {
+    await withDaemon(() => {}, async ({ conn }) => {
+      const socket = (conn as any).socket;
+      const request = conn.request(
+        { type: "ping", reqId: "eof" }, (e): e is PongEvent => e.type === "pong", 2_000,
+      );
+      const response = collectResponse(conn, "test", "test", 2_000);
+      // Simulate a transport delivering EOF without an immediate close event.
+      socket.emit("end");
+      await expect(request).rejects.toThrow("closed");
+      await expect(response).rejects.toThrow("closed");
+      expect(socket.destroyed).toBe(true);
+      expect((conn as any).socket).toBeNull();
+      expect((conn as any).listeners).toHaveLength(0);
+      expect((conn as any).disconnectListeners.size).toBe(0);
     });
   });
 
@@ -68,7 +86,7 @@ describe("socket transport", () => {
     });
   });
 
-  test("late data/close from a disconnected socket cannot affect a new connection", async () => {
+  test("late data/end/close from a disconnected socket cannot affect a new connection", async () => {
     await withDaemon((command, socket) => emit(socket, { type: "pong", reqId: command.reqId }), async ({ conn }) => {
       const old = (conn as any).socket;
       const events: Event[] = [];
@@ -76,6 +94,7 @@ describe("socket transport", () => {
       conn.disconnect();
       await conn.connect();
       old.emit("data", Buffer.from('{"type":"text_chunk","convId":"old","text":"stale"}\n'));
+      old.emit("end");
       old.emit("close");
       await conn.request({ type: "ping", reqId: "new" }, (e): e is PongEvent => e.type === "pong" && e.reqId === "new");
       expect(events).toEqual([{ type: "pong", reqId: "new" }]);

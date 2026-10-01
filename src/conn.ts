@@ -62,6 +62,14 @@ export class Connection {
         if (!resolved) reject(error);
         else this.connectionLost(socket, error);
       });
+      socket.on("end", () => {
+        clearTimeout(timer);
+        // Readable EOF means no more responses can arrive. Named pipes can
+        // defer "close" until the writable half closes, so do not wait for it.
+        if (!resolved) reject(new Error("Connection closed before connecting"));
+        else this.connectionLost(socket, new Error("Connection to exocortexd closed"));
+        socket.destroy();
+      });
       socket.on("close", () => {
         clearTimeout(timer);
         if (!resolved) reject(new Error("Connection closed before connecting"));
