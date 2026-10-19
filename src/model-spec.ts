@@ -15,7 +15,7 @@ const DEEPSEEK_ALIASES: Record<string, ModelId> = {
 };
 
 export function isProviderId(value: string): value is ProviderId {
-  return value === "openai" || value === "deepseek" || value === "opencode" || value === "openrouter";
+  return value === "openai" || value === "anthropic" || value === "deepseek" || value === "opencode" || value === "openrouter";
 }
 
 export function inferProviderForModel(model: ModelId | null): ProviderId | undefined {

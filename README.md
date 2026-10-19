@@ -54,7 +54,7 @@ are unaffected.
 
 ## Current daemon compatibility
 
-Providers: `openai`, `deepseek`, `opencode`, and `openrouter`. Read `exo models`
+Providers: `openai`, `anthropic`, `deepseek`, `opencode`, and `openrouter`. Read `exo models`
 for the daemon's advertised models, reasoning efforts, and service tiers.
 Namespaced IDs work as `--model openrouter/nousresearch/hermes-4-405b` or
 `--provider openrouter --model nousresearch/hermes-4-405b`.

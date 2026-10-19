@@ -7,7 +7,7 @@
 
 // ── Providers / Models ──────────────────────────────────────────────
 
-export type ProviderId = "openai" | "deepseek" | "opencode" | "openrouter";
+export type ProviderId = "openai" | "anthropic" | "deepseek" | "opencode" | "openrouter";
 export type FastMode = boolean | "ultrafast";
 
 export interface ModelInfo {

@@ -10,6 +10,7 @@ describe("model-spec", () => {
   test("recognizes valid providers", () => {
     expect(isProviderId("openai")).toBe(true);
     expect(isProviderId("deepseek")).toBe(true);
+    expect(isProviderId("anthropic")).toBe(true);
     expect(isProviderId("nope")).toBe(false);
   });
 

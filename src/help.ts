@@ -13,11 +13,11 @@ const INSTANCE_FLAG_SUMMARY = `  --instance <worktree>             Target anothe
 const MODEL_FLAG_SUMMARY = `  --model <spec>                    Model ID or latest size alias: openai/astra | openai/sol
   --legacy                         Explicitly allow older delegation models
   --effort <level>                  none | minimal | low | medium | high | xhigh | max | ultra
-  --provider <id>                   openai | deepseek | opencode | openrouter`;
+  --provider <id>                   openai | anthropic | deepseek | opencode | openrouter`;
 
 const MODEL_FLAG_SUMMARY_SEND = `  --model <spec>                    Model ID or latest size alias: openai/astra | openai/sol
   --legacy                         Explicitly allow older delegation models
-  --provider <id>                   openai | deepseek | opencode | openrouter
+  --provider <id>                   openai | anthropic | deepseek | opencode | openrouter
   --effort <level>                  none | minimal | low | medium | high | xhigh | max | ultra`;
 
 const SUBAGENT_WORKING_DIRECTORY_GUIDANCE = `  Subagents start in the configured global working directory. For project-specific
