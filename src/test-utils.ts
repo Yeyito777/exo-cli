@@ -21,7 +21,7 @@ export async function capture(run: () => Promise<unknown>) {
 /** Unique temporary socket/pipe and config. Never uses the live daemon endpoint. */
 export async function withDaemon(
   handler: (command: Command, socket: Socket) => void,
-  run: (fixture: { conn: Connection; args: string[]; commands: Command[] }) => Promise<void>,
+  run: (fixture: { conn: Connection; args: string[]; commands: Command[]; endpoint: string }) => Promise<void>,
 ) {
   const root = await mkdtemp(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "ecli-"));
   const instance = `t${Math.random().toString(36).slice(2, 8)}`;
@@ -57,7 +57,7 @@ export async function withDaemon(
       server.listen(endpoint, done);
     });
     await conn.connect();
-    await run({ conn, commands, args: ["--repo-root", root, "--instance", instance] });
+    await run({ conn, commands, endpoint, args: ["--repo-root", root, "--instance", instance] });
   } finally {
     conn.disconnect();
     for (const socket of sockets) socket.destroy();

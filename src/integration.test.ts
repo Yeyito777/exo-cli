@@ -120,13 +120,12 @@ describe("isolated daemon integration", () => {
 
   test("targets the invoking daemon's EXOCORTEX_SOCKET unless an instance is named", async () => {
     const providers: never[] = [];
-    await withDaemon((_command, socket) => emit(socket, { type: "tools_available", tools: [], providers }), async ({ args, commands }) => {
-      const [, root, , instance] = args;
-      const endpoint = join(root!, "c", "runtime", instance!, "exocortexd.sock");
+    await withDaemon((_command, socket) => emit(socket, { type: "tools_available", tools: [], providers }), async ({ args, commands, endpoint }) => {
+      const root = args[1]!;
       const viaSocket = await runCli(["models", "--json"], "", undefined, { EXOCORTEX_SOCKET: endpoint });
       expect(viaSocket.code).toBe(0);
       expect(commands.length).toBe(1);
-      const explicit = await runCli([...args, "models", "--json"], "", undefined, { EXOCORTEX_SOCKET: join(root!, "missing.sock") });
+      const explicit = await runCli([...args, "models", "--json"], "", undefined, { EXOCORTEX_SOCKET: join(root, "missing.sock") });
       expect(explicit.code).toBe(0);
       expect(commands.length).toBe(2);
     });
