@@ -74,10 +74,10 @@ export function emit(socket: Socket, event: Event) {
   socket.write(JSON.stringify(event) + "\n");
 }
 
-export async function runCli(args: string[], input = "audit 🐋 café", entry = cliEntry) {
+export async function runCli(args: string[], input = "audit 🐋 café", entry = cliEntry, env: Record<string, string> = {}) {
   const child = Bun.spawn([process.execPath, entry, ...args], {
     stdin: "pipe", stdout: "pipe", stderr: "pipe",
-    env: { ...process.env, EXOCORTEX_PARENT_CONV_ID: "" },
+    env: { ...process.env, EXOCORTEX_PARENT_CONV_ID: "", EXOCORTEX_SOCKET: "", ...env },
   });
   child.stdin.write(input);
   child.stdin.end();

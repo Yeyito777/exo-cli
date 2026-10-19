@@ -113,8 +113,16 @@ export function runtimeDir(): string {
     : join(configDir(), "runtime");
 }
 
+let _socketOverride: string | null = null;
+
+/** Use an exact daemon endpoint (the invoking daemon's EXOCORTEX_SOCKET). */
+export function setSocketOverride(path: string | null): void {
+  _socketOverride = path && path.trim() ? path.trim() : null;
+}
+
 /** Full path to the daemon socket or Windows named pipe. */
 export function socketPath(platform: NodeJS.Platform = process.platform): string {
+  if (_socketOverride) return _socketOverride;
   if (platform === "win32") {
     const wt = effectiveWorktreeName();
     return wt ? `\\\\.\\pipe\\exocortexd-${wt}` : "\\\\.\\pipe\\exocortexd";

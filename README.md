@@ -68,7 +68,9 @@ Tool selection and conversation-scoped custom modules are retired. The old
 a migration error; no draft-policy IPC is sent.
 
 `--repo-root PATH` selects an Exocortex checkout/install root. `--instance NAME`
-selects a worktree under its `.worktrees` directory. `EXOCORTEX_CONFIG_DIR` also
+selects a worktree under its `.worktrees` directory. Without either flag, a
+process launched by a daemon (which sets `EXOCORTEX_SOCKET`) talks to that same
+daemon, so agents inside a worktree or test instance stay there. `EXOCORTEX_CONFIG_DIR` also
 selects the same config root as the daemon. The default source installation
 remains `<Exocortex>/external-tools/exo-cli`; compiled Windows executables use
 the directory beside `exocortexd.exe`.

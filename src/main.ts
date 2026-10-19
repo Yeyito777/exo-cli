@@ -8,7 +8,7 @@ import {
 import { parseArgs } from "./args";
 import { printHelp, printCommandHelp, hasCommandHelp } from "./help";
 import { DEFAULT_SYSTEM_PROMPT, readExactStdin, readExactUtf8File } from "./payload";
-import { setRepoRootOverride, setWorktreeOverride, sourceRepoRoot, worktreeName } from "./shared/paths";
+import { setRepoRootOverride, setSocketOverride, setWorktreeOverride, sourceRepoRoot, worktreeName } from "./shared/paths";
 import { version } from "../package.json";
 
 async function main(): Promise<number> {
@@ -63,6 +63,10 @@ async function main(): Promise<number> {
     return 2;
   }
 
+  // A tool process launched by a daemon talks to that daemon (a worktree or test
+  // instance included). Explicit --repo-root/--instance still choose another one.
+  const invokingSocket = process.env.EXOCORTEX_SOCKET?.trim();
+  if (invokingSocket && !args.repoRoot && !args.instance) setSocketOverride(invokingSocket);
   if (args.repoRoot) setRepoRootOverride(args.repoRoot);
   if (args.instance) {
     setWorktreeOverride(args.instance);
