@@ -82,6 +82,7 @@ async function main(): Promise<number> {
     folderPath: args.folderPath, autoTitle: args.autoTitle,
     newConversationId: args.newConversationId, effort: args.effort,
     legacy: args.legacy, fastMode: args.fastMode ?? undefined,
+    sender: parent,
   };
   const conn = new Connection();
   try { await conn.connect(args.timeout); } catch (error) {
