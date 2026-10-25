@@ -48,6 +48,8 @@ export interface ParentNotificationTarget {
 
 export interface SendMessageCommand {
   delegation?: boolean;
+  /** The conversation running this CLI (EXOCORTEX_PARENT_CONV_ID): shown as the prompt's sender. */
+  sender?: string;
   legacy?: boolean;
   type: "send_message";
   reqId?: string;
@@ -203,6 +205,8 @@ export type QueueTiming = "next-turn" | "message-end";
 
 export interface QueueMessageCommand {
   delegation?: boolean;
+  /** As SendMessageCommand.sender. */
+  sender?: string;
   legacy?: boolean;
   type: "queue_message";
   reqId?: string;

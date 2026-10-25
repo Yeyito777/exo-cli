@@ -60,6 +60,20 @@ describe("delegation wire policy", () => {
     expect(commands[1]).toMatchObject({ type: "llm_complete", delegation: true, legacy: true, effort: "xhigh" });
   });
 
+  test("sends and queues name the conversation running the CLI as their sender", async () => {
+    const commands: Command[] = [];
+    const conn = fixture(commands);
+    await withoutOutput(async () => {
+      await send(conn, "detached", "child", null, null, { ...options, sender: "parent-conv" });
+      await queue(conn, "child", "queued", "next-turn", false, { ...options, sender: "parent-conv" });
+      await queue(conn, "child", "from a shell", "next-turn", false, { ...options, sender: null });
+    });
+    expect(commands[0]).toMatchObject({ type: "send_message", delegation: true, sender: "parent-conv", detached: true });
+    expect(commands[1]).toMatchObject({ type: "queue_message", delegation: true, sender: "parent-conv" });
+    expect(commands[2]).toMatchObject({ type: "queue_message", delegation: true });
+    expect(commands[2]).not.toHaveProperty("sender");
+  });
+
   test("foreground collector also carries delegation and legacy flags", async () => {
     const commands: Command[] = [];
     let handler: (event: Event) => void;
@@ -73,7 +87,7 @@ describe("delegation wire policy", () => {
         handler({ type: "error", convId: "child", message: "test stop" } as Event);
       },
     } as unknown as Connection;
-    await expect(collectResponse(conn, "child", "test", 1000, undefined, { delegation: true, legacy: true })).rejects.toThrow("test stop");
-    expect(commands[0]).toMatchObject({ type: "send_message", delegation: true, legacy: true });
+    await expect(collectResponse(conn, "child", "test", 1000, undefined, { delegation: true, legacy: true, sender: "parent-conv" })).rejects.toThrow("test stop");
+    expect(commands[0]).toMatchObject({ type: "send_message", delegation: true, legacy: true, sender: "parent-conv" });
   });
 });

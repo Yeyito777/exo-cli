@@ -36,6 +36,10 @@ is reserved for the primary prompt.
 
 Run `exo -h` for the complete command reference.
 
+What `send` and `queue` deliver is never shown as the owner's own message: the
+daemon stores it as an automated Exo delegation, from the conversation running
+the CLI (`EXOCORTEX_PARENT_CONV_ID`, sent as `sender`) when there is one.
+
 ## Delegation models
 
 Almost never use subagents; do the work yourself by default, including testing.

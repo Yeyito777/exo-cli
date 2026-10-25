@@ -35,7 +35,7 @@ export function collectResponse(
   text: string,
   timeoutMs: number,
   onStream?: StreamCallback,
-  delegation?: Pick<SendMessageCommand, "delegation" | "legacy">,
+  delegation?: Pick<SendMessageCommand, "delegation" | "legacy" | "sender">,
 ): Promise<CollectedResponse> {
   return new Promise((resolve, reject) => {
     const blocks: Block[] = [];

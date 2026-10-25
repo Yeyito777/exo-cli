@@ -46,6 +46,13 @@ export interface OutputOptions {
   effort?: EffortLevel | null;
   legacy?: boolean;
   fastMode?: FastMode;
+  /** The conversation running this CLI, if any: the daemon shows it as the sender. */
+  sender?: string | null;
+}
+
+/** Tells the daemon a send or queue comes from this CLI, and from which conversation. */
+function delegationFields(opts: Pick<OutputOptions, "legacy" | "sender"> | undefined, legacy = opts?.legacy) {
+  return { delegation: true, legacy, ...(opts?.sender ? { sender: opts.sender } : {}) };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -343,8 +350,7 @@ export async function send(
     await conn.request<AckEvent>(
       {
         type: "send_message",
-        delegation: true,
-        legacy: opts.legacy,
+        ...delegationFields(opts),
         reqId,
         convId,
         text,
@@ -393,13 +399,13 @@ export async function send(
 
   let response: Awaited<ReturnType<typeof collectResponse>>;
   try {
-    response = await collectResponse(conn, convId, text, opts.timeout, onStream, { delegation: true, legacy: opts.legacy });
+    response = await collectResponse(conn, convId, text, opts.timeout, onStream, delegationFields(opts));
   } catch (err: any) {
     // If the conversation is actively streaming, auto-queue for next turn
     if (convId && err?.message?.includes("Already streaming")) {
       const reqId = nextReqId();
       await conn.request<AckEvent>(
-        { type: "queue_message", reqId, convId, text, timing: "next-turn", delegation: true, legacy: opts.legacy },
+        { type: "queue_message", reqId, convId, text, timing: "next-turn", ...delegationFields(opts) },
         (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
         opts.timeout,
       );
@@ -808,7 +814,7 @@ export async function abort(conn: Connection, convId: string, opts?: OutputOptio
 export async function queue(conn: Connection, convId: string, text: string, timing: QueueTiming, legacy = false, opts?: OutputOptions): Promise<number> {
   const reqId = nextReqId();
   await conn.request<AckEvent>(
-    { type: "queue_message", reqId, convId, text, timing, delegation: true, legacy },
+    { type: "queue_message", reqId, convId, text, timing, ...delegationFields(opts, legacy) },
     (e): e is AckEvent => e.type === "ack" && e.reqId === reqId,
     opts?.timeout,
   );
