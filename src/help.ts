@@ -408,7 +408,7 @@ conversation is ephemeral (never stored), has only the --system-file text as
 its system prompt and no tools. Exit status 1 when the turn errs or is aborted.
 
 ${b("USAGE")}
-  printf '%s' 'Name three primes.' | exo run --model claude-haiku-4-5
+  printf '%s' 'Name three primes.' | exo run --model claude-haiku-5-5
   printf '%s' 'What does this repo do?' | exo run --tools read,glob,grep --cwd . --base agent
   cat q.txt | exo run --system-file sys.txt --provider openai --json
   printf '%s' 'Draft a plan' | exo run --app myapp --lifetime saved
@@ -429,7 +429,7 @@ ${MODEL_FLAG_SUMMARY_SEND}
 
 ${b("OUTPUT")}
   The final assistant text. A kept (temporary/saved) conversation's ID goes to
-  stderr.
+  stderr; continue it with exo send -c <id>.
 `,
   llm: `${b("exo llm")} [flags]
 

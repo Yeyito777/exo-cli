@@ -48,14 +48,14 @@ ephemeral by default (nothing stored), with only your `--system-file` text as
 its system prompt and no tools unless you name them:
 
 ```sh
-printf '%s' 'Name three primes.' | exo run --model claude-haiku-4-5
+printf '%s' 'Name three primes.' | exo run --model claude-haiku-5-5
 printf '%s' 'What does this repo do?' | exo run --tools read,glob,grep --cwd . --base agent
 printf '%s' 'Draft a plan' | exo run --app myapp --lifetime saved --json
 exo list --apps --saved
 ```
 
 `--lifetime temporary|saved` (or `--keep`, which means temporary) keeps the
-conversation and prints its ID on stderr; `--json` prints the `turn_result`.
+conversation and prints its ID on stderr (continue it with `exo send -c`); `--json` prints the `turn_result`.
 `exo list --apps` lists live hidden app conversations (`--saved` adds saved
 ones, `--app NAME` filters).
 
