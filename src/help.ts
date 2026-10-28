@@ -61,6 +61,7 @@ ${b("COMMANDS")}
   rename <id> <title>               Rename a conversation
   generate-title <id>               Start daemon-owned title generation
   llm [--system-file <path>]        One-shot LLM from stdin
+  run [--tools ...] [--cwd ...]     One-shot app conversation from stdin (app API)
   transcribe <audio-file>           Transcribe audio through exocortexd
   status                            Check if daemon is running
   help [command]                    Show help
@@ -84,7 +85,7 @@ ${MODEL_FLAG_SUMMARY}
   --stream                          Stream events as NDJSON
   --id                              Print only conversation ID
   --timeout <sec>                   Max wait time (default 300)
-  --system-file <path>              Custom system prompt file (for llm)
+  --system-file <path>              Custom system prompt file (for llm, run)
   --mime-type <type>                Audio MIME type (for transcribe)
   --detach, --background            Start exo send and return immediately
   --foreground                      Disable parent-agent auto-detach for send
@@ -194,14 +195,20 @@ Alias: ls
 ${b("USAGE")}
   exo list
   exo list --json
+  exo list --apps                    Live hidden app conversations (temporary, ephemeral)
+  exo list --apps --saved --app nvim
 
 ${b("FLAGS")}
 ${INSTANCE_FLAG_SUMMARY}
   --json                            Output as JSON array
+  --apps                            List app conversations instead (app API)
+  --saved                           With --apps: include saved ones
+  --app <name>                      With --apps: only this app's
 
 ${b("OUTPUT")}
   Default: table with ID, model, message count, title, last updated.
   Pinned conversations show 📌, marked conversations show ★.
+  --apps: ID, app, lifetime, model, running/idle, owned or not, title, expiry.
 `,
 
   jobs: `${b("exo jobs")} [flags]
@@ -393,6 +400,37 @@ ${b("OUTPUT")}
   Exit code 2 if daemon is not running.
 `,
 
+  run: `${b("exo run")} [flags]
+
+One-shot app conversation (Exocortex app API, docs/app-api.md): the prompt
+comes from stdin, the final reply's text goes to stdout. By default the
+conversation is ephemeral (never stored), has only the --system-file text as
+its system prompt and no tools. Exit status 1 when the turn errs or is aborted.
+
+${b("USAGE")}
+  printf '%s' 'Name three primes.' | exo run --model claude-haiku-5-5
+  printf '%s' 'What does this repo do?' | exo run --tools read,glob,grep --cwd . --base agent
+  cat q.txt | exo run --system-file sys.txt --provider openai --json
+  printf '%s' 'Draft a plan' | exo run --app myapp --lifetime saved
+
+${b("FLAGS")}
+${INSTANCE_FLAG_SUMMARY}
+  --app <name>                      App name (default exo-cli); saved runs go to apps/<name>/
+  --lifetime <l>                    ephemeral (default) | temporary | saved
+  --keep                            Keep the conversation: --lifetime temporary unless given
+  --system-file <path>              Exact UTF-8 system prompt file
+  --base <b>                        none (default) | agent | full: what the text is added to
+  --tools <a,b,...>                 Built-in tools: bash, read, write, edit, glob, grep,
+                                     web_search, web_fetch, exo, chrono, goal, attach; or all
+  --cwd <dir>                       Existing directory the tools run in
+${MODEL_FLAG_SUMMARY_SEND}
+  --json                            Print the turn_result object instead of the text
+  --timeout <sec>                   Max wait for the turn (default 300)
+
+${b("OUTPUT")}
+  The final assistant text. A kept (temporary/saved) conversation's ID goes to
+  stderr; continue it with exo send -c <id>.
+`,
   llm: `${b("exo llm")} [flags]
 
 One-shot LLM completion from an exact UTF-8 stdin prompt. No conversation is

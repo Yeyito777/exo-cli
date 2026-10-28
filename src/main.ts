@@ -6,6 +6,9 @@ import {
   generateTitle, llm, transcribeAudio, status, type OutputOptions,
 } from "./commands";
 import { parseArgs } from "./args";
+import { runApp, listApps } from "./app";
+import { isAbsolute, resolve } from "node:path";
+import { statSync } from "node:fs";
 import { printHelp, printCommandHelp, hasCommandHelp } from "./help";
 import { DEFAULT_SYSTEM_PROMPT, readExactStdin, readExactUtf8File } from "./payload";
 import { setRepoRootOverride, setSocketOverride, setWorktreeOverride, sourceRepoRoot, worktreeName } from "./shared/paths";
@@ -35,8 +38,21 @@ async function main(): Promise<number> {
 
   let payload: string | null = null;
   let system = DEFAULT_SYSTEM_PROMPT;
+  let appSystem: string | null = null;
+  let cwd: string | null = null;
   try {
-    if (args.subcommand === "send" || args.subcommand === "llm") {
+    if (args.subcommand === "run") {
+      if (args.positionals.length) throw new Error("run prompt must be provided via stdin; inline prompt is not accepted");
+      payload = await readExactStdin("run prompt");
+      if (args.systemFile !== null) {
+        if (args.systemFile === "-") throw new Error("--system-file cannot be '-'; stdin is reserved for the prompt");
+        appSystem = await readExactUtf8File(args.systemFile, "run system prompt");
+      }
+      if (args.cwd !== null) {
+        cwd = isAbsolute(args.cwd) ? args.cwd : resolve(args.cwd);
+        if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`--cwd is not a directory: ${cwd}`);
+      }
+    } else if (args.subcommand === "send" || args.subcommand === "llm") {
       if (args.positionals.length) throw new Error(`${args.subcommand} ${args.subcommand === "send" ? "message" : "prompt"} must be provided via stdin; inline ${args.subcommand === "send" ? "message" : "prompt"} is not accepted`);
       payload = await readExactStdin(args.subcommand === "send" ? "send message" : "llm prompt");
       if (args.systemFile !== null) {
@@ -93,7 +109,14 @@ async function main(): Promise<number> {
   try {
     const id = args.positionals[0];
     switch (args.subcommand) {
-      case "list": return await list(conn, opts);
+      case "list": return args.apps
+        ? await listApps(conn, { app: args.app, saved: args.saved, json: args.json, timeout: args.timeout })
+        : await list(conn, opts);
+      case "run": return await runApp(conn, payload!, {
+        app: args.app, lifetime: args.lifetime, keep: args.keep, system: appSystem, base: args.base,
+        tools: args.tools, cwd, provider: args.provider, model: args.model, effort: args.effort,
+        json: args.json, timeout: args.timeout,
+      });
       case "jobs": return await jobs(conn, opts);
       case "models": return await models(conn, opts);
       case "status": return await status(conn, opts);

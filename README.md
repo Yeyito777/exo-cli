@@ -40,6 +40,25 @@ What `send` and `queue` deliver is never shown as the owner's own message: the
 daemon stores it as an automated Exo delegation, from the conversation running
 the CLI (`EXOCORTEX_PARENT_CONV_ID`, sent as `sender`) when there is one.
 
+## App API one-shots
+
+`exo run` is a one-shot through the daemon's app API (Exocortex
+`docs/app-api.md`): the prompt from stdin, the final text on stdout. It is
+ephemeral by default (nothing stored), with only your `--system-file` text as
+its system prompt and no tools unless you name them:
+
+```sh
+printf '%s' 'Name three primes.' | exo run --model claude-haiku-5-5
+printf '%s' 'What does this repo do?' | exo run --tools read,glob,grep --cwd . --base agent
+printf '%s' 'Draft a plan' | exo run --app myapp --lifetime saved --json
+exo list --apps --saved
+```
+
+`--lifetime temporary|saved` (or `--keep`, which means temporary) keeps the
+conversation and prints its ID on stderr (continue it with `exo send -c`); `--json` prints the `turn_result`.
+`exo list --apps` lists live hidden app conversations (`--saved` adds saved
+ones, `--app NAME` filters).
+
 ## Delegation models
 
 Almost never use subagents; do the work yourself by default, including testing.
