@@ -269,6 +269,71 @@ export interface LogoutCommand {
   reqId?: string;
 }
 
+// ── App API (docs/app-api.md) ───────────────────────────────────────
+
+export type AppLifetime = "saved" | "temporary" | "ephemeral";
+export type AppSystemBase = "none" | "agent" | "full";
+
+export interface AppToolDef {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  timeoutMs?: number;
+}
+
+export interface ClientCapabilitiesCommand {
+  type: "client_capabilities";
+  reqId?: string;
+  capabilities: never[];
+  /** Declares an app connection; answered with app_welcome. */
+  app?: { name: string; version?: string };
+}
+
+/** Create an app conversation, send `prompt`, answer turn_result when the turn ends. */
+export interface AppRunCommand {
+  type: "app_run";
+  reqId?: string;
+  app?: string;
+  lifetime?: AppLifetime;
+  title?: string;
+  system?: { text?: string; base?: AppSystemBase };
+  tools?: { builtin?: string[] | "all"; app?: AppToolDef[] };
+  provider?: ProviderId;
+  model?: ModelId;
+  effort?: EffortLevel;
+  cwd?: string;
+  prompt: string;
+  keep?: boolean;
+}
+
+export interface ListAppConversationsCommand {
+  type: "list_app_conversations";
+  reqId?: string;
+  app?: string;
+  includeSaved?: boolean;
+}
+
+export interface AppConversationInfo {
+  convId: string;
+  app: string;
+  lifetime: AppLifetime;
+  title: string;
+  provider: string;
+  model: string;
+  effort?: string;
+  createdAt: number;
+  lastActivityAt: number;
+  expiresAt?: number;
+  idleTtlMs?: number;
+  ownerConnected: boolean;
+  streaming: boolean;
+  cwd?: string;
+  workspace?: string;
+  systemBase: AppSystemBase;
+  builtinTools: string[] | "all";
+  appTools: string[];
+}
+
 export type Command =
   | PingCommand
   | NewConversationCommand
@@ -289,7 +354,10 @@ export type Command =
   | DeleteFolderCommand
   | QueueMessageCommand
   | LlmCompleteCommand
-  | TranscribeAudioCommand;
+  | TranscribeAudioCommand
+  | ClientCapabilitiesCommand
+  | AppRunCommand
+  | ListAppConversationsCommand;
 
 // ── Events (daemon → client) ────────────────────────────────────────
 
@@ -534,6 +602,31 @@ export interface AuthStatusEvent {
   openUrl?: string;
 }
 
+export interface AppWelcomeEvent {
+  type: "app_welcome";
+  reqId?: string;
+  appApiVersion: number;
+  app: string;
+  instance: string;
+  pid: number;
+}
+
+export interface TurnResultEvent {
+  type: "turn_result";
+  reqId?: string;
+  convId: string;
+  text: string;
+  stopReason: "end_turn" | "aborted" | "error";
+  error?: string;
+  usage?: { outputTokens: number; durationMs: number };
+}
+
+export interface AppConversationsListEvent {
+  type: "app_conversations_list";
+  reqId?: string;
+  conversations: AppConversationInfo[];
+}
+
 export interface ErrorEvent {
   type: "error";
   reqId?: string;
@@ -573,4 +666,7 @@ export type Event =
   | SystemPromptEvent
   | TranscriptionResultEvent
   | AuthStatusEvent
+  | AppWelcomeEvent
+  | TurnResultEvent
+  | AppConversationsListEvent
   | ErrorEvent;
