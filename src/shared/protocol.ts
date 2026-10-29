@@ -286,7 +286,7 @@ export interface ClientCapabilitiesCommand {
   reqId?: string;
   capabilities: never[];
   /** Declares an app connection; answered with app_welcome. */
-  app?: { name: string; version?: string };
+  app?: { name: string; version?: string; session?: string; reconnectGraceMs?: number };
 }
 
 /** Create an app conversation, send `prompt`, answer turn_result when the turn ends. */
@@ -294,6 +294,10 @@ export interface AppRunCommand {
   type: "app_run";
   reqId?: string;
   app?: string;
+  /** Our own id: the same run sent again after a reconnect carries on with it. */
+  convId?: string;
+  /** The prompt's time; the turn_result's turnId. */
+  startedAt?: number;
   lifetime?: AppLifetime;
   title?: string;
   system?: { text?: string; base?: AppSystemBase };
@@ -609,16 +613,27 @@ export interface AppWelcomeEvent {
   app: string;
   instance: string;
   pid: number;
+  /** The session token (daemons with sessions): sent back to take the session back after a reconnect. */
+  session?: string;
+  reconnectGraceMs?: number;
+  resumed?: boolean;
+  conversations?: string[];
 }
 
 export interface TurnResultEvent {
   type: "turn_result";
   reqId?: string;
   convId: string;
+  /** The startedAt of the prompt that started the turn. */
+  turnId: string;
   text: string;
   stopReason: "end_turn" | "aborted" | "error";
   error?: string;
   usage?: { outputTokens: number; durationMs: number };
+  /** The turn ran on Claude API credits. */
+  billing?: "api-credits";
+  /** It stopped at a usage limit it may not wait out. */
+  limited?: { resetAt: number | null };
 }
 
 export interface AppConversationsListEvent {

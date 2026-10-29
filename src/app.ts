@@ -13,13 +13,13 @@ const INSTALL_COMMAND = "curl -fsSL https://raw.githubusercontent.com/Yeyito777/
 let counter = 0;
 const nextReqId = () => `app_${++counter}_${Date.now()}`;
 
-/** Declare the connection an app client and check the daemon's app API version. */
-export async function declareApp(conn: Connection, app: string, timeout = 5_000): Promise<AppWelcomeEvent> {
+/** Declare the connection an app client and check the daemon's app API version; `session` takes that session back. */
+export async function declareApp(conn: Connection, app: string, timeout = 5_000, session?: string): Promise<AppWelcomeEvent> {
   const reqId = nextReqId();
   let welcome: AppWelcomeEvent;
   try {
     welcome = await conn.request<AppWelcomeEvent>(
-      { type: "client_capabilities", reqId, capabilities: [], app: { name: app } },
+      { type: "client_capabilities", reqId, capabilities: [], app: { name: app, ...(session ? { session } : {}) } },
       (e): e is AppWelcomeEvent => e.type === "app_welcome" && e.reqId === reqId,
       timeout,
     );
@@ -69,16 +69,60 @@ export function appRunCommand(prompt: string, opts: RunOptions, reqId: string): 
   };
 }
 
-/** exo run: one app_run, printing the final text (or the turn_result with --json). */
-export async function runApp(conn: Connection, prompt: string, opts: RunOptions): Promise<number> {
-  await declareApp(conn, opts.app ?? DEFAULT_APP, Math.min(opts.timeout, 5_000));
-  const reqId = nextReqId();
-  const command = appRunCommand(prompt, opts, reqId);
-  const result = await conn.request<TurnResultEvent>(
-    command,
-    (e: Event): e is TurnResultEvent => e.type === "turn_result" && e.reqId === reqId,
-    opts.timeout,
-  );
+/** A conversation id of our own (`^\d+-[a-z0-9]{6}$`), so the run can be sent again after a reconnect. */
+export const newConvId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8).padEnd(6, "0")}`;
+
+const isDisconnect = (error: unknown) => error instanceof Error
+  && /Connection to exocortexd closed|Connection failed|Not connected|Disconnected from exocortexd/.test(error.message);
+
+/** Connect again with backoff and take the session back. */
+async function reconnect(conn: Connection, app: string, session: string, deadline: number, delayMs: number): Promise<void> {
+  let delay = delayMs;
+  for (;;) {
+    try {
+      await conn.connect(Math.max(1, Math.min(5_000, deadline - Date.now())));
+      await declareApp(conn, app, 5_000, session);
+      return;
+    } catch (error) {
+      conn.disconnect();
+      if (Date.now() + delay > deadline) {
+        throw new Error(`Lost the connection to exocortexd and could not reconnect: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      await Bun.sleep(delay);
+      delay = Math.min(delay * 2, 2_000);
+    }
+  }
+}
+
+/**
+ * exo run: one app_run, printing the final text (or the turn_result with --json).
+ * A daemon restart or a dropped connection is only a delay: it reconnects under
+ * its session and sends the same run again, which the daemon carries on with.
+ */
+export async function runApp(conn: Connection, prompt: string, opts: RunOptions, deps: { reconnectDelayMs?: number } = {}): Promise<number> {
+  const app = opts.app ?? DEFAULT_APP;
+  const welcome = await declareApp(conn, app, Math.min(opts.timeout, 5_000));
+  const command: AppRunCommand = { ...appRunCommand(prompt, opts, nextReqId()), convId: newConvId(), startedAt: Date.now() };
+  const turnId = String(command.startedAt);
+  const deadline = Date.now() + opts.timeout;
+  let result: TurnResultEvent;
+  for (;;) {
+    const reqId = command.reqId;
+    try {
+      result = await conn.request<TurnResultEvent>(
+        command,
+        (e: Event): e is TurnResultEvent => e.type === "turn_result"
+          && (e.reqId === reqId || (!e.reqId && e.convId === command.convId && e.turnId === turnId)),
+        Math.max(1, deadline - Date.now()),
+      );
+      break;
+    } catch (error) {
+      // A daemon from before sessions would run it twice: only one with sessions gets it again.
+      if (!welcome.session || !isDisconnect(error)) throw error;
+      await reconnect(conn, app, welcome.session, deadline, deps.reconnectDelayMs ?? 100);
+      command.reqId = nextReqId();
+    }
+  }
   const kept = command.lifetime === "saved" || command.lifetime === "temporary";
   if (opts.json) process.stdout.write(JSON.stringify(result) + "\n");
   else {

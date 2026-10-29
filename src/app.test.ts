@@ -7,18 +7,27 @@ import { parseArgs } from "./args";
 import { emit, runCli, withDaemon } from "./test-utils";
 import type { Command } from "./shared/protocol";
 
-function appDaemon(opts: { welcome?: boolean; version?: number; stopReason?: "end_turn" | "error" | "aborted" } = {}) {
+function appDaemon(opts: { welcome?: boolean; version?: number; stopReason?: "end_turn" | "error" | "aborted"; sessions?: boolean; dropFirstRun?: boolean } = {}) {
+  let runs = 0;
   return (command: Command, socket: Socket) => {
     if (command.type === "client_capabilities") {
       if (opts.welcome === false) return;
-      emit(socket, { type: "app_welcome", reqId: command.reqId, appApiVersion: opts.version ?? 1, app: command.app!.name, instance: "t", pid: 1 });
+      emit(socket, {
+        type: "app_welcome", reqId: command.reqId, appApiVersion: opts.version ?? 1, app: command.app!.name, instance: "t", pid: 1,
+        ...(opts.sessions ? { session: command.app!.session ?? "test-session-token-1234", resumed: Boolean(command.app!.session) } : {}),
+      });
+    }
+    // A daemon restart while the first run is in flight: the connection drops.
+    if (command.type === "app_run" && opts.dropFirstRun && ++runs === 1) {
+      socket.destroy();
+      return;
     }
     if (command.type === "app_run") {
       emit(socket, { type: "conversation_created", reqId: command.reqId, convId: "1793160000000-ab12cd", model: "m" });
       emit(socket, { type: "text_chunk", convId: "1793160000000-ab12cd", text: "three " });
       const stopReason = opts.stopReason ?? "end_turn";
       emit(socket, {
-        type: "turn_result", reqId: command.reqId, convId: "1793160000000-ab12cd", stopReason,
+        type: "turn_result", reqId: command.reqId, convId: "1793160000000-ab12cd", turnId: String(command.startedAt ?? ""), stopReason,
         text: stopReason === "end_turn" ? "2, 3, 5" : "", ...(stopReason === "error" ? { error: "provider down" } : {}),
         usage: { outputTokens: 5, durationMs: 10 },
       });
@@ -63,7 +72,8 @@ describe("exo run", () => {
       expect(JSON.parse(result.output)).toMatchObject({ type: "turn_result", text: "2, 3, 5", stopReason: "end_turn" });
       expect(commands[0]).toMatchObject({ app: { name: "exo-cli" } });
       const run = commands[1] as any;
-      expect(Object.keys(run).sort()).toEqual(["prompt", "reqId", "type"]);
+      expect(Object.keys(run).sort()).toEqual(["convId", "prompt", "reqId", "startedAt", "type"]);
+      expect(run.convId).toMatch(/^\d+-[a-z0-9]{6}$/);
     });
   });
 
@@ -75,6 +85,29 @@ describe("exo run", () => {
     });
     await withDaemon(appDaemon({ stopReason: "aborted" }), async ({ args }) => {
       expect((await runCli([...args, "run"], "hi")).code).toBe(1);
+    });
+  });
+
+  test("a dropped connection mid-run reconnects under its session and sends the same run again", async () => {
+    await withDaemon(appDaemon({ sessions: true, dropFirstRun: true }), async ({ args, commands }) => {
+      const result = await runCli([...args, "run"], "hi");
+      expect(result.output).toBe("2, 3, 5\n");
+      expect(result.code).toBe(0);
+      const runs = commands.filter(c => c.type === "app_run") as any[];
+      expect(runs).toHaveLength(2);
+      expect(runs[1].convId).toBe(runs[0].convId);
+      expect(runs[1].startedAt).toBe(runs[0].startedAt);
+      expect(runs[1].reqId).not.toBe(runs[0].reqId);
+      const caps = commands.filter(c => c.type === "client_capabilities") as any[];
+      expect(caps[1].app.session).toBe("test-session-token-1234");
+    });
+  });
+
+  test("a daemon without sessions is not sent a run twice", async () => {
+    await withDaemon(appDaemon({ dropFirstRun: true }), async ({ args, commands }) => {
+      const result = await runCli([...args, "run"], "hi");
+      expect(result.code).toBe(1);
+      expect(commands.filter(c => c.type === "app_run")).toHaveLength(1);
     });
   });
 
