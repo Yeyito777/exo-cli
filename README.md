@@ -58,6 +58,10 @@ exo list --apps --saved
 conversation and prints its ID on stderr (continue it with `exo send -c`); `--json` prints the `turn_result`.
 `exo list --apps` lists live hidden app conversations (`--saved` adds saved
 ones, `--app NAME` filters).
+A daemon restart or a dropped connection during a run is only a delay: `exo
+run` reconnects under its app session and sends the same run again, which the
+daemon carries on with (daemons with app sessions; an older one fails as
+before rather than running it twice).
 
 ## Delegation models
 
